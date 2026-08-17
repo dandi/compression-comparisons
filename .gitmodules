@@ -1,0 +1,4 @@
+[submodule "src/bwc"]
+	path = src/bwc
+	url = https://vcgit.hhi.fraunhofer.de/vceg-sw/bwc
+	datalad-url = https://vcgit.hhi.fraunhofer.de/vceg-sw/bwc
