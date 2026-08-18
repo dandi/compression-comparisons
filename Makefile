@@ -57,6 +57,14 @@ smoke:
 	@echo "--- report.jsonl ---"
 	@cat $(RESULTS_DIR)/report.jsonl
 
+.PHONY: containers containers-apptainer
+containers:
+	./containers/build.sh
+containers-apptainer:
+	./containers/to_apptainer.sh compbench-base:$${TAG:-local}
+	./containers/to_apptainer.sh compbench-ks25:$${TAG:-local}
+	./containers/to_apptainer.sh compbench-ks4:$${TAG:-local}
+
 .PHONY: clean
 clean:
 	rm -rf .venv .tox build dist *.egg-info results
