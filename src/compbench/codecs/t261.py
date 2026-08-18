@@ -121,7 +121,20 @@ def _read_rawh2(path: Path) -> np.ndarray:
 
 
 class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
-    """numcodecs.Codec wrapper around the BWC reference encoder/decoder."""
+    """numcodecs.Codec wrapper around the BWC reference encoder/decoder.
+
+    Lossy control:
+        ``step_size_for_qp`` — overrides the preset's ``StepSizeForQP``.
+            1.0 is lossless; > 1.0 triggers quantization (higher = coarser
+            → higher CR, more distortion). Values around 1.5..8 span the
+            useful lossy range for biosignals.
+        ``max_abs_delta_qp`` — overrides ``MaxAbsDeltaQP``; enables per-block
+            QP variation (0 = uniform, higher = more adaptive).
+
+    Any additional ``extra_args`` are appended verbatim after the standard
+    flags. Both `step_size_for_qp` and `max_abs_delta_qp` translate to
+    ``--StepSizeForQP=X`` / ``--MaxAbsDeltaQP=X`` overrides on the CLI.
+    """
 
     codec_id = "t261"
 
@@ -129,6 +142,8 @@ class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
         self,
         preset: str = "combinedPresetEEG_IndepChannel_lossless",
         bit_depth: int = 16,
+        step_size_for_qp: float | None = None,
+        max_abs_delta_qp: int | None = None,
         extra_args: tuple[str, ...] = (),
     ) -> None:
         if not _AVAILABLE:
@@ -143,14 +158,28 @@ class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
             raise ValueError(f"BWC preset {preset!r} not found. Available: {available}")
         self.preset = preset
         self.bit_depth = int(bit_depth)
+        self.step_size_for_qp = float(step_size_for_qp) if step_size_for_qp is not None else None
+        self.max_abs_delta_qp = int(max_abs_delta_qp) if max_abs_delta_qp is not None else None
         self.extra_args = tuple(extra_args)
         self._cfg_path = cfg_path
+
+    def _build_overrides(self) -> list[str]:
+        """CLI arg list assembled from lossy knobs + user extras."""
+        args: list[str] = []
+        if self.step_size_for_qp is not None:
+            args.append(f"--StepSizeForQP={self.step_size_for_qp}")
+        if self.max_abs_delta_qp is not None:
+            args.append(f"--MaxAbsDeltaQP={self.max_abs_delta_qp}")
+        args.extend(self.extra_args)
+        return args
 
     def get_config(self) -> dict[str, Any]:
         return {
             "id": self.codec_id,
             "preset": self.preset,
             "bit_depth": self.bit_depth,
+            "step_size_for_qp": self.step_size_for_qp,
+            "max_abs_delta_qp": self.max_abs_delta_qp,
             "extra_args": list(self.extra_args),
         }
 
@@ -171,7 +200,7 @@ class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
                 f"--InputNumChannels={n_channels}",
                 f"--BitstreamFile={bs_path}",
                 "--FileFormat=RawH2",
-                *self.extra_args,
+                *self._build_overrides(),
             ]
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
             if proc.returncode != 0:
@@ -215,16 +244,36 @@ if _AVAILABLE:
             self,
             preset: str = "combinedPresetEEG_IndepChannel_lossless",
             bit_depth: int | str = 16,
+            step_size_for_qp: float | str | None = None,
+            max_abs_delta_qp: int | str | None = None,
             **kw: Any,
         ) -> None:
-            super().__init__(preset=preset, bit_depth=int(bit_depth), **kw)
+            step = float(step_size_for_qp) if step_size_for_qp not in (None, "", "None") else None
+            delta = int(max_abs_delta_qp) if max_abs_delta_qp not in (None, "", "None") else None
+            super().__init__(
+                preset=preset,
+                bit_depth=int(bit_depth),
+                step_size_for_qp=step,
+                max_abs_delta_qp=delta,
+                **kw,
+            )
             self._preset = preset
             self._bit_depth = int(bit_depth)
+            self._step_size_for_qp = step
+            self._max_abs_delta_qp = delta
 
         @property
         def lossy(self) -> bool:  # type: ignore[override]
-            # The .cfg name is the source of truth: `_lossless` suffix ⇒ lossless.
+            # Explicit QP override always wins; otherwise the preset name is
+            # the source of truth (`_lossless` suffix = lossless).
+            if self._step_size_for_qp is not None and self._step_size_for_qp > 1.0:
+                return True
             return "_lossless" not in self._preset
 
         def make_codec(self) -> Codec:
-            return T261Codec(preset=self._preset, bit_depth=self._bit_depth)
+            return T261Codec(
+                preset=self._preset,
+                bit_depth=self._bit_depth,
+                step_size_for_qp=self._step_size_for_qp,
+                max_abs_delta_qp=self._max_abs_delta_qp,
+            )

@@ -1,0 +1,6 @@
+# T.261 lossy — ECG independent-channel preset, stock tuning.
+# For ECG conformance evaluation the paper's PRD / PRDN metrics apply.
+codec: t261
+params:
+  preset: combinedPresetECG_IndepChannel
+  bit_depth: 16
