@@ -15,14 +15,19 @@ SMOKE_CELL  ?= $(RESULTS_DIR)/blosc-zstd-l3
 .PHONY: help
 help:
 	@echo "Targets:"
-	@echo "  install    - create .venv and install compbench in devel mode"
-	@echo "  test       - unit tests (tox -e py311)"
-	@echo "  lint       - ruff check + format-check (tox -e lint)"
-	@echo "  type       - mypy strict (tox -e type)"
-	@echo "  cov        - unit tests + coverage (tox -e cov)"
-	@echo "  integration- end-to-end tests (tox -e integration)"
-	@echo "  smoke      - one duct-wrapped compbench cell + report; < 30 s"
-	@echo "  clean      - remove .venv, .tox, build/, results/"
+	@echo "  install         - create .venv and install compbench in devel mode"
+	@echo "  test            - unit tests (tox -e py311)"
+	@echo "  lint            - ruff check + format-check (tox -e lint)"
+	@echo "  type            - mypy strict (tox -e type)"
+	@echo "  cov             - unit tests + coverage (tox -e cov)"
+	@echo "  integration     - end-to-end tests (tox -e integration)"
+	@echo "  smoke           - one duct-wrapped compbench cell + report; < 5 s"
+	@echo "  snakemake-smoke - same via the full Snakemake DAG on smoke.yaml"
+	@echo "  paper           - PROFILE=... — Snakemake sweep on a profile YAML"
+	@echo "  full            - PROFILE=... — same as `paper' but --cores 8 default"
+	@echo "  containers      - build all three compbench-* container images"
+	@echo "  containers-apptainer - convert built images to .sif for HPC"
+	@echo "  clean           - remove .venv, .tox, build/, results/"
 
 .PHONY: install
 install:
@@ -56,6 +61,8 @@ smoke:
 	compbench report --results-dir $(RESULTS_DIR) --output $(RESULTS_DIR)/report.jsonl
 	@echo "--- report.jsonl ---"
 	@cat $(RESULTS_DIR)/report.jsonl
+# Note: `make smoke` requires `duct` (in `[devel]` extra) and `compbench` on PATH.
+# Uses `synthetic:` dataset — no external files.
 
 .PHONY: paper full snakemake-smoke
 snakemake-smoke:

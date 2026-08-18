@@ -37,6 +37,67 @@ jobs:
       - name: tox (via tox-gh-actions mapping)
         run: tox
 
+  # Separate job so T.261 tests actually run against a real BWC build.
+  # Without this job, all t261 tests would be `pytest.skipif(...not _AVAILABLE)`
+  # skipped and a regression could silently ship.
+  bwc-build-and-test:
+    name: BWC + T.261 codec tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system build deps
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ make
+
+      - name: Build BWC (with GCC-12 restrict workaround)
+        run: |
+          cmake -S src/bwc -B src/bwc/build \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_CXX_FLAGS="-Wno-restrict"
+          cmake --build src/bwc/build -j$(nproc)
+          test -x src/bwc/bin/release/EncoderApp
+          test -x src/bwc/bin/release/DecoderApp
+
+      - name: Install compbench devel
+        run: pip install -e '.[devel]'
+
+      - name: Verify t261 registers
+        run: |
+          compbench list-codecs
+          compbench list-codecs | grep -qx t261
+
+      - name: Run T.261 unit + integration tests
+        env:
+          COMPBENCH_REQUIRE_T261: "1"
+        run: |
+          # Fails fast if t261 tests would be silently skipped.
+          pytest -v -m "not integration" \
+              tests/unit/test_t261_codec.py \
+              tests/unit/test_t261_lossy.py \
+              tests/unit/test_codecs_extras.py
+
+      - name: End-to-end sweep (portable paper.yaml)
+        run: |
+          pip install snakemake
+          snakemake -s src/compbench/pipeline/Snakefile \
+              --configfile configs/profiles/paper.yaml \
+              --config results_dir=results/ci-paper \
+              --cores 2
+
+      - name: Upload sweep artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bwc-sweep-results
+          path: results/
+          if-no-files-found: warn
+
   smoke:
     name: End-to-end smoke
     runs-on: ubuntu-latest

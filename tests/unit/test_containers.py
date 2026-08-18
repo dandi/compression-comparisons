@@ -42,6 +42,26 @@ def test_dockerfile_has_sanity_check(name: str) -> None:
 
 
 @pytest.mark.ai_generated
+@pytest.mark.parametrize("name", ["compbench-base", "compbench-ks25", "compbench-ks4"])
+def test_dockerfile_builds_bwc_and_registers_t261(name: str) -> None:
+    """Every container image must build BWC and prove `t261` shows up in
+    `compbench list-codecs` at image-build time — otherwise Snakemake
+    profiles that reference `t261` will fail inside the container."""
+    body = (CONTAINERS / f"{name}.Dockerfile").read_text()
+    # BWC sources copied and built.
+    assert "COPY src/bwc /opt/bwc" in body, f"{name} does not copy src/bwc into the image"
+    assert "cmake --build /opt/bwc/build" in body, f"{name} does not build BWC"
+    assert "-Wno-restrict" in body, f"{name} missing GCC-12 false-positive workaround"
+    # Environment points the wrapper at the built binaries + configs.
+    assert "BWC_BIN_DIR=/opt/bwc/bin/release" in body
+    assert "BWC_CFG_DIR=/opt/bwc/cfg" in body
+    # Build-time proof that t261 registers.
+    assert "compbench list-codecs | grep -qx t261" in body, (
+        f"{name} does not assert t261 registration at build time"
+    )
+
+
+@pytest.mark.ai_generated
 def test_all_dockerfiles_pin_same_aind_tag() -> None:
     tags = set()
     for name in ["compbench-base", "compbench-ks25", "compbench-ks4"]:
