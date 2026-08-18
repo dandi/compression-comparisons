@@ -1,0 +1,9 @@
+# Tiny synthetic dataset — used by `make smoke` and CI smoke tests.
+# 0.5 s × 4 channels × 2 kHz = 4000 samples × 2 bytes = 8 KB
+# Fast enough for < 1 s round-trip; still enough for con-duct to sample.
+loader: synthetic
+params:
+  duration_s: 0.5
+  sample_rate_hz: 2000
+  n_channels: 4
+  seed: 1

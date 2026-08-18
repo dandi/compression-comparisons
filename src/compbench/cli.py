@@ -14,6 +14,7 @@ from typing import Any
 import click
 
 from compbench import __version__, codecs
+from compbench.report import aggregate_directory, write_parquet
 from compbench.runner import run_cell
 
 
@@ -118,6 +119,35 @@ def run(
     ):
         click.echo("ERROR: lossless codec produced non-exact round-trip.", err=True)
         sys.exit(2)
+
+
+@main.command("report")
+@click.option(
+    "--results-dir",
+    required=True,
+    type=click.Path(exists=True, file_okay=False),
+    help="Root directory to walk for per-cell `metrics.json` files.",
+)
+@click.option(
+    "--output",
+    required=True,
+    type=click.Path(dir_okay=False),
+    help="Output path — `.parquet` for Parquet, `.jsonl` for JSON Lines.",
+)
+def report(results_dir: str, output: str) -> None:
+    """Aggregate a directory of benchmark cells into a table."""
+    rows = aggregate_directory(Path(results_dir))
+    out = Path(output)
+    if out.suffix == ".parquet":
+        write_parquet(rows, out)
+    elif out.suffix == ".jsonl":
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with out.open("w") as f:
+            for row in rows:
+                f.write(json.dumps(row, sort_keys=True) + "\n")
+    else:
+        raise click.ClickException(f"Unsupported --output extension: {out.suffix!r}")
+    click.echo(f"wrote {len(rows)} row(s) to {out}")
 
 
 if __name__ == "__main__":

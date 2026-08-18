@@ -1,0 +1,14 @@
+# Smoke profile — the tiniest sweep that still exercises the full pipeline.
+# Used by `make smoke` and CI.
+name: smoke
+datasets:
+  - configs/datasets/synthetic-tiny.yaml
+codecs:
+  - codec: blosc-zstd
+    params:
+      level: 3
+      shuffle: byte
+  - codec: blosc-zstd
+    params:
+      level: 5
+      shuffle: bit

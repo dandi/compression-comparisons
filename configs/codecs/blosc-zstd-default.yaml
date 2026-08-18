@@ -1,0 +1,5 @@
+# Default `blosc-zstd` codec configuration — matches Buccino et al. Fig 2 defaults.
+codec: blosc-zstd
+params:
+  level: 3
+  shuffle: byte
