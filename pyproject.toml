@@ -38,6 +38,10 @@ audio = [
     # PyPI release we can pin to lands. Loader currently registers `flac`
     # only if `flac_numcodecs` is importable.
 ]
+ephys = [
+    "spikeinterface>=0.100",
+    "dandi>=0.60",   # for the DANDI shortcut loader (Phase 1/2)
+]
 test = [
     "pytest>=7.4",
     "pytest-cov>=4.1",

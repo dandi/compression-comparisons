@@ -78,8 +78,14 @@ def _parse_kv(s: str) -> dict[str, Any]:
 
 
 # Import side-effect: register loaders.
+import contextlib as _contextlib  # noqa: E402
+
 from compbench.datasets import npy as _npy  # noqa: F401,E402
 from compbench.datasets import synthetic as _synthetic  # noqa: F401,E402
 from compbench.datasets import yaml_loader as _yaml  # noqa: F401,E402
+
+# Optional loaders — require extra packages.
+with _contextlib.suppress(ImportError):
+    from compbench.datasets import spikeinterface_loader as _si  # noqa: F401
 
 __all__ = ["LoadedDataset", "load", "register", "schemes"]
