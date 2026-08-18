@@ -1,0 +1,93 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "compbench"
+version = "0.0.1.dev0"
+description = "Turnkey compression benchmark for biomedical waveform data, comparing ITU-T T.261/H.BWC against the Buccino et al. 2023 codec set."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "Yaroslav Halchenko", email = "yaroslav.o.halchenko@dartmouth.edu" },
+]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Intended Audience :: Science/Research",
+]
+dependencies = [
+    "click>=8.1",
+    "numpy>=1.24",
+    "numcodecs>=0.12",
+    "zarr>=2.16,<3",
+    "pyyaml>=6.0",
+    "con-duct>=0.7",
+    "pyarrow>=15",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "pytest-timeout>=2.2",
+]
+devel = [
+    "compbench[test]",
+    "ruff>=0.4",
+    "mypy>=1.8",
+    "pre-commit>=3.5",
+    "tox>=4.11",
+    "tox-uv>=1.11",
+]
+ci = [
+    "compbench[devel]",
+    "tox-gh-actions>=3.2",
+]
+
+[project.scripts]
+compbench = "compbench.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/compbench"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/compbench",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = [
+    "E501",  # line-length is enforced by formatter; ruff-check trips on strings
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+files = ["src/compbench"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "ai_generated: tests authored by an AI assistant (Claude Code)",
+    "integration: end-to-end tests requiring the compbench CLI and `duct` on PATH",
+]

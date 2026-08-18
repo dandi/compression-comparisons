@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.venv/
+venv/
+.python-version
+
+# Build artifacts (bwc CMake out-of-tree builds)
+src/bwc/build/
+src/bwc/bin/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Benchmark outputs
+results/
+.duct/
+
+# Datalad — the datalad handler manages this itself, but noted here for clarity
+# (do NOT gitignore .datalad — it holds dataset metadata)
