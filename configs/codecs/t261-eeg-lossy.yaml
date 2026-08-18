@@ -1,8 +1,10 @@
-# T.261 lossy — EEG independent-channel preset, stock tuning.
-# Corresponds to `combinedPresetEEG_IndepChannel.cfg` (StepSizeForQP=1.001,
-# tools enabled: BlockMatching, TrafoSignalAdapt=0, TrafoDiffs=0, ...).
-# Distortion is fixed by the preset; the paper's WavPack-Hybrid bps sweep
-# analogue is in the `t261-eeg-lossy-qp*.yaml` variants.
+# T.261 lossy reference — EEG independent-channel preset, stock tuning.
+# Corresponds to `src/bwc/cfg/combinedPresetEEG_IndepChannel.cfg`
+# (StepSizeForQP=1.001, i.e. barely-lossy default).
+#
+# For a WavPack-Hybrid `bps` analogue quality sweep, override
+# `step_size_for_qp` inline in the profile YAML (see configs/profiles/paper.yaml).
+# Distortion (RMSE, PRD, PRDN) rises monotonically with StepSizeForQP.
 codec: t261
 params:
   preset: combinedPresetEEG_IndepChannel

@@ -70,6 +70,13 @@ ci = [
 [project.scripts]
 compbench = "compbench.cli:main"
 
+[project.entry-points."numcodecs.codecs"]
+# Consumers with `numcodecs>=0.13` auto-discover the T.261 codec on `pip install
+# compbench`, so `zarr.open(...)` on a T.261-compressed store works without
+# needing to `import compbench.codecs.t261` first. Discovery only succeeds if
+# BWC binaries are also present — the T261Codec constructor raises otherwise.
+t261 = "compbench.codecs.t261:T261Codec"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/compbench"]
 

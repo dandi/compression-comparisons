@@ -79,6 +79,45 @@ def test_bad_input_shape_raises() -> None:
 
 
 @pytest.mark.ai_generated
+def test_empty_input_rejected() -> None:
+    codec = t261_mod.T261Codec()
+    with pytest.raises(ValueError, match="at least one sample"):
+        codec.encode(np.zeros((0, 4), dtype=np.int16))
+
+
+@pytest.mark.ai_generated
+def test_zero_channels_rejected() -> None:
+    codec = t261_mod.T261Codec()
+    with pytest.raises(ValueError, match="at least one channel"):
+        codec.encode(np.zeros((100, 0), dtype=np.int16))
+
+
+@pytest.mark.ai_generated
+def test_single_channel_ok() -> None:
+    codec = t261_mod.T261Codec()
+    data = np.arange(200, dtype=np.int16).reshape(-1, 1)
+    enc = codec.encode(data)
+    dec = codec.decode(enc)
+    assert np.array_equal(data, dec)
+
+
+@pytest.mark.ai_generated
+def test_bit_depth_other_than_16_rejected() -> None:
+    with pytest.raises(ValueError, match="not supported by the RawH2 stopgap"):
+        t261_mod.T261Codec(bit_depth=24)
+
+
+@pytest.mark.ai_generated
+def test_too_many_channels_rejected() -> None:
+    # We can't allocate a real 66k-channel int16 array cheaply; call the writer
+    # directly with a synthetic guard-only shape via a dummy array.
+    codec = t261_mod.T261Codec()
+    huge = np.zeros((1, 70_000), dtype=np.int16)
+    with pytest.raises(ValueError, match="uint16"):
+        codec.encode(huge)
+
+
+@pytest.mark.ai_generated
 def test_rawh2_header_roundtrip(tmp_path: Path) -> None:
     data = np.arange(24, dtype=np.int16).reshape(6, 4)
     p = tmp_path / "x.raw"

@@ -1,7 +1,0 @@
-# T.261 lossy — "very fast" ECG preset (stock).
-# Reduced tool set (fewer full-RD candidates, no signal adaptation) for
-# speed at the cost of some CR. Useful for encode-throughput profiling.
-codec: t261
-params:
-  preset: veryFastPresetECG
-  bit_depth: 16

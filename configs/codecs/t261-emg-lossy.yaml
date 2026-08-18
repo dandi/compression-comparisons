@@ -1,5 +1,0 @@
-# T.261 lossy — EMG independent-channel preset, stock tuning.
-codec: t261
-params:
-  preset: combinedPresetEMG_IndepChannel
-  bit_depth: 16

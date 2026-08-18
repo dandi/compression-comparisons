@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from compbench.report import aggregate_directory, load_cell, load_duct_info, write_parquet
+from compbench.report.aggregate import AmbiguousDuctInfoWarning
 
 
 def _write_cell(d: Path, metrics: dict[str, Any], manifest: dict[str, Any] | None = None) -> None:
@@ -141,6 +142,29 @@ def test_write_parquet_empty(tmp_path: Path) -> None:
     write_parquet([], out)
     tab = pq.read_table(out)
     assert tab.num_rows == 0
+
+
+@pytest.mark.ai_generated
+def test_ambiguous_duct_info_warns_and_returns_no_resource_fields(tmp_path: Path) -> None:
+    _write_cell(tmp_path, metrics={"cr": 1.0}, manifest={"codec": {"name": "x"}})
+    # Two non-standard duct-info files → ambiguous; loader must warn and drop
+    # the resource fields rather than silently pick one.
+    _write_duct_info(tmp_path, {"wall_clock_time": 1.0}, prefix="alpha-")
+    _write_duct_info(tmp_path, {"wall_clock_time": 2.0}, prefix="beta-")
+    with pytest.warns(AmbiguousDuctInfoWarning):
+        row = load_cell(tmp_path)
+    assert row is not None
+    assert "duct_wall_time_s" not in row
+
+
+@pytest.mark.ai_generated
+def test_canonical_duct_info_wins_over_alternates(tmp_path: Path) -> None:
+    _write_cell(tmp_path, metrics={"cr": 1.0}, manifest={"codec": {"name": "x"}})
+    _write_duct_info(tmp_path, {"wall_clock_time": 5.5})  # duct-info.json
+    _write_duct_info(tmp_path, {"wall_clock_time": 9.9}, prefix="x-")  # ignored
+    row = load_cell(tmp_path)
+    assert row is not None
+    assert row["duct_wall_time_s"] == 5.5
 
 
 @pytest.mark.ai_generated

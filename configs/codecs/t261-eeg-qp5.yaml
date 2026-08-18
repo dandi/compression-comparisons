@@ -1,5 +1,0 @@
-codec: t261
-params:
-  preset: combinedPresetEEG_IndepChannel
-  bit_depth: 16
-  step_size_for_qp: 5.0

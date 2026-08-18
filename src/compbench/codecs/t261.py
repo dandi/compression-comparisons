@@ -94,13 +94,25 @@ CFG_DIR = _resolve_cfg_dir()
 _AVAILABLE = ENCODER is not None and DECODER is not None and CFG_DIR is not None
 
 
+_MAX_CHANNELS_RAWH2 = 65535  # uint16 header field
+
+
 def _write_rawh2(path: Path, data: np.ndarray) -> None:
     """Write a (n_samples, n_channels) int16 array as RawH2 (see module docstring)."""
     if data.ndim != 2:
         raise ValueError(f"T.261 expects 2D (n_samples, n_channels) input, got shape {data.shape}")
     if data.dtype != np.int16:
         raise ValueError(f"T.261 expects int16 input, got dtype {data.dtype}")
-    _, n_channels = data.shape
+    n_samples, n_channels = data.shape
+    if n_samples <= 0:
+        raise ValueError(f"T.261 requires at least one sample; got shape {data.shape}")
+    if n_channels <= 0:
+        raise ValueError(f"T.261 requires at least one channel; got shape {data.shape}")
+    if n_channels > _MAX_CHANNELS_RAWH2:
+        raise ValueError(
+            f"T.261 RawH2 header caps n_channels at {_MAX_CHANNELS_RAWH2} (uint16); "
+            f"got {n_channels}. Split the recording into channel groups upstream."
+        )
     with path.open("wb") as f:
         f.write(_RAWH2_HEADER.pack(n_channels, 16))
         f.write(np.ascontiguousarray(data, dtype="<i2").tobytes())
@@ -156,6 +168,12 @@ class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
         if cfg_path is None or not cfg_path.is_file():
             available = ", ".join(sorted(p.stem for p in (CFG_DIR or Path()).glob("*.cfg")))
             raise ValueError(f"BWC preset {preset!r} not found. Available: {available}")
+        if int(bit_depth) != 16:
+            raise ValueError(
+                f"bit_depth={bit_depth} not supported by the RawH2 stopgap wrapper "
+                f"(header hard-codes 16-bit samples). The pybind11 wrapper in Phase 2b "
+                f"will honour 16-24 bpp per the T.261 spec."
+            )
         self.preset = preset
         self.bit_depth = int(bit_depth)
         self.step_size_for_qp = float(step_size_for_qp) if step_size_for_qp is not None else None

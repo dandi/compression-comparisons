@@ -105,11 +105,9 @@ def run_cell(
     manifest = build_manifest(
         dataset_provenance=ds.provenance,
         codec_description=adapter.describe(),
-        input_bytes=ds.data.tobytes(),
+        input_array=ds.data,
         sample_rate_hz=ds.sample_rate_hz,
         duration_s=duration,
-        n_channels=ds.n_channels,
-        dtype=str(ds.data.dtype),
     )
     return CellResult(
         manifest=manifest,

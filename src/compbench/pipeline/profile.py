@@ -58,22 +58,33 @@ class Profile:
         return {"name": self.name, "datasets": self.datasets, "codecs": self.codecs}
 
 
-def load_profile(path: str | Path) -> Profile:
-    p = Path(path)
-    with p.open() as f:
-        raw = yaml.safe_load(f) or {}
+def load_profile(source: str | Path | dict[str, Any]) -> Profile:
+    """Parse a profile from a YAML path or an already-parsed dict.
+
+    Both entry points (Snakefile's ``--configfile`` and ``compbench``'s own
+    ``--profile`` arg) share this validator so the schema check happens
+    exactly once and the same error messages are raised in both cases.
+    """
+    if isinstance(source, dict):
+        raw = source
+        label = "<dict>"
+    else:
+        p = Path(source)
+        label = str(p)
+        with p.open() as f:
+            raw = yaml.safe_load(f) or {}
     name = raw.get("name")
     if not name:
-        raise ValueError(f"Profile {p}: missing `name:`")
+        raise ValueError(f"Profile {label}: missing `name:`")
     datasets = raw.get("datasets") or []
     if not isinstance(datasets, list) or not datasets:
-        raise ValueError(f"Profile {p}: `datasets:` must be a non-empty list")
+        raise ValueError(f"Profile {label}: `datasets:` must be a non-empty list")
     codecs = raw.get("codecs") or []
     if not isinstance(codecs, list) or not codecs:
-        raise ValueError(f"Profile {p}: `codecs:` must be a non-empty list")
+        raise ValueError(f"Profile {label}: `codecs:` must be a non-empty list")
     for i, c in enumerate(codecs):
         if not isinstance(c, dict) or "codec" not in c:
-            raise ValueError(f"Profile {p}: codecs[{i}] must be a dict with `codec:`")
+            raise ValueError(f"Profile {label}: codecs[{i}] must be a dict with `codec:`")
     return Profile(name=str(name), datasets=[str(d) for d in datasets], codecs=list(codecs))
 
 

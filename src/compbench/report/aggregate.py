@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import json
+import warnings
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 _DUCT_INFO_SUFFIX = "info.json"
+
+
+class AmbiguousDuctInfoWarning(UserWarning):
+    """Multiple `*info.json` candidates in a cell dir → resource fields dropped."""
 
 
 def _find_duct_info(cell_dir: Path) -> Path | None:
@@ -16,6 +21,10 @@ def _find_duct_info(cell_dir: Path) -> Path | None:
     Convention: Snakemake / user invokes `duct --output-prefix <cell_dir>/duct- …`,
     so the file is `<cell_dir>/duct-info.json`. We also accept any single
     `*info.json` in the directory as a fallback.
+
+    On ambiguity (multiple non-standard `*info.json` files, none named
+    `duct-info.json`) we emit an :class:`AmbiguousDuctInfoWarning` — the row
+    will lack `duct_*` fields and a silent null is misleading.
     """
     candidate = cell_dir / f"duct-{_DUCT_INFO_SUFFIX}"
     if candidate.exists():
@@ -25,6 +34,14 @@ def _find_duct_info(cell_dir: Path) -> Path | None:
     matches = [p for p in matches if p.name not in {"manifest.json", "metrics.json"}]
     if len(matches) == 1:
         return matches[0]
+    if len(matches) > 1:
+        warnings.warn(
+            f"Ambiguous duct-info in {cell_dir}: {[p.name for p in matches]}. "
+            "Resource fields will be null. Use --output-prefix duct- for a "
+            "single canonical file.",
+            AmbiguousDuctInfoWarning,
+            stacklevel=2,
+        )
     return None
 
 

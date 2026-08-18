@@ -1,29 +1,22 @@
-# Paper reproduction profile (portable) — Buccino et al. 2023 Fig 2 & 3
-# lossless sweep + T.261 / H.BWC QP-swept lossy Pareto.
+# Paper reproduction profile (full) — Buccino et al. 2023 Fig 2 & 3
+# lossless sweep including WavPack, extended with T.261 / H.BWC.
 #
-# This profile deliberately omits `wavpack` (see `paper-with-wavpack.yaml`
-# for the full paper matrix) because `wavpack-numcodecs` ships glibc-specific
-# bundled binaries that fail to install on some hosts (e.g. Debian 12 glibc
-# 2.36). This "portable" profile runs everywhere; the "-with-wavpack" variant
-# runs in the containers and on Ubuntu 22.04/24.04.
+# This variant adds `wavpack` cells to the portable `paper.yaml`. Requires
+# `wavpack-numcodecs` to be installable on the host, which depends on the
+# glibc version matching one of the wheel's bundled binaries (works on
+# Ubuntu 22.04/24.04, all container images, manylinux CI runners; fails on
+# Debian 12 glibc 2.36 as of 2026-08).
 #
 # STATUS: scaffolded. The `datasets:` list below currently points at
 # synthetic-tiny (so the pipeline runs end-to-end without external data).
-# To reproduce the paper, replace those entries with YAML configs pointing
-# at the exact IBL / AIND NWB recordings the paper used — see
-# .specify/specs/paper-datasets.md (to be written when data is fetched).
-#
-# Ephys use lives outside T.261's clinical envelope, but stays inside its
-# research envelope (up to 40 kHz, 16–24 bpp). Neuropixels-1.0 recordings
-# at 30 kHz × 384 ch × 16 bit are a fair stress test.
 
-name: paper
+name: paper-with-wavpack
 datasets:
   # PLACEHOLDER — will be replaced with real paper datasets once fetched.
   - configs/datasets/synthetic-tiny.yaml
 
 codecs:
-  # blosc family — 4 inner codecs × 2 levels each. Matches paper's Fig 2 axis.
+  # blosc family — 4 inner codecs × 2 levels each.
   - {codec: blosc-lz4,   params: {level: 3, shuffle: byte}}
   - {codec: blosc-lz4,   params: {level: 9, shuffle: byte}}
   - {codec: blosc-lz4hc, params: {level: 3, shuffle: byte}}
@@ -33,7 +26,7 @@ codecs:
   - {codec: blosc-zstd,  params: {level: 3, shuffle: byte}}
   - {codec: blosc-zstd,  params: {level: 9, shuffle: byte}}
 
-  # Standard codecs used directly (no blosc framing) — same axis as paper.
+  # Standard codecs used directly.
   - {codec: gzip,        params: {level: 5}}
   - {codec: gzip,        params: {level: 9}}
   - {codec: zlib,        params: {level: 5}}
@@ -43,18 +36,14 @@ codecs:
   - {codec: zstd,        params: {level: 22}}
   - {codec: lzma,        params: {preset: 6}}
 
-  # (Audio codecs — WavPack / FLAC — deliberately deferred to
-  # `paper-with-wavpack.yaml` to keep this profile installable on any host.)
+  # Audio codecs — the reason to use this profile over `paper.yaml`.
+  - {codec: wavpack,     params: {level: 1}}
+  - {codec: wavpack,     params: {level: 2}}
+  # - {codec: flac,        params: {level: 5}}  # add when flac-numcodecs lands
 
-  # T.261 / H.BWC — the codec this benchmark exists to compare.
-  # Lossless: EEG independent-channel is the closest analogue to the paper's
-  # audio-codec lossless settings (WavPack / FLAC).
+  # T.261 / H.BWC — lossless + lossy QP sweep (see paper.yaml for details).
   - {codec: t261,        params: {preset: combinedPresetEEG_IndepChannel_lossless}}
   - {codec: t261,        params: {preset: combinedPresetEEG_lossless}}
-  # Lossy QP sweep — WavPack-Hybrid `bps=2.25..6` analogue. Distortion (RMSE,
-  # PRD, PRDN) rises monotonically with StepSizeForQP; pick 5 points that span
-  # from "barely-lossy" to "aggressive". Verified monotone on synthetic data;
-  # ephys empirical CR/RMSE at each point are exactly the Pareto we plot.
   - {codec: t261,        params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 1.5}}
   - {codec: t261,        params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 2.0}}
   - {codec: t261,        params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 3.0}}
