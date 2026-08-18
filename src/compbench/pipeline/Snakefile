@@ -38,6 +38,21 @@ RESULTS_DIR = Path(config.get("results_dir", f"results/{_profile.name}"))
 CELLS = list(expand_matrix(_profile))
 CELL_BY_ID = {c.cell_id: c for c in CELLS}
 
+# Early validation — fail up front with a readable message if any cell asks
+# for a codec that isn't registered on this host (e.g. wavpack-numcodecs
+# missing due to glibc mismatch; t261 missing because src/bwc/ isn't built).
+from compbench import codecs as _cbcodecs
+
+_available = set(_cbcodecs.names())
+_missing = sorted({c.codec for c in CELLS if c.codec not in _available})
+if _missing:
+    raise WorkflowError(
+        f"Profile requests codec(s) not registered on this host: {_missing}.\n"
+        f"Available codecs: {sorted(_available)}\n"
+        f"Fix by installing the codec's extras (e.g. `pip install -e .[audio]` for "
+        f"wavpack; `cmake --build src/bwc/build` for t261) — see plan §4.2 / §5."
+    )
+
 CONTAINER_BASE = config.get(
     "container_base", "docker://ghcr.io/allenneuraldynamics/aind-ephys-pipeline-base:si-0.103.0"
 )
