@@ -57,6 +57,27 @@ smoke:
 	@echo "--- report.jsonl ---"
 	@cat $(RESULTS_DIR)/report.jsonl
 
+.PHONY: paper full snakemake-smoke
+snakemake-smoke:
+	snakemake -s src/compbench/pipeline/Snakefile \
+	    --configfile configs/profiles/smoke.yaml \
+	    --config results_dir=results/smoke-snakemake \
+	    --cores $${CORES:-2}
+
+paper:
+	@[ -f "$${PROFILE:-}" ] || (echo "usage: make paper PROFILE=configs/profiles/paper.yaml" && exit 1)
+	snakemake -s src/compbench/pipeline/Snakefile \
+	    --configfile "$$PROFILE" \
+	    --cores $${CORES:-4} \
+	    $${SNAKEMAKE_ARGS:-}
+
+full:
+	@[ -f "$${PROFILE:-}" ] || (echo "usage: make full PROFILE=configs/profiles/full.yaml" && exit 1)
+	snakemake -s src/compbench/pipeline/Snakefile \
+	    --configfile "$$PROFILE" \
+	    --cores $${CORES:-8} \
+	    $${SNAKEMAKE_ARGS:-}
+
 .PHONY: containers containers-apptainer
 containers:
 	./containers/build.sh

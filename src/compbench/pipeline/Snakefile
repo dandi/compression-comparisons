@@ -1,0 +1,98 @@
+# SPDX-FileCopyrightText: 2026 Yaroslav Halchenko <yaroslav.o.halchenko@dartmouth.edu>
+# SPDX-License-Identifier: MIT
+# Generated with Claude Code 2.1.234 / Claude Opus 4.7 (1M context)
+#
+# Snakemake orchestration around `duct compbench run …`. The Snakefile is
+# intentionally thin: enumerate cells from a profile YAML, shell one
+# duct-wrapped compbench invocation per cell, then aggregate.
+#
+# Usage:
+#   snakemake -s src/compbench/pipeline/Snakefile \
+#       --configfile configs/profiles/smoke.yaml \
+#       --cores 4 \
+#       [--use-apptainer | --use-singularity]
+#
+# The `container:` directives use `docker://…` — Snakemake transparently
+# handles conversion to `.sif` at runtime on HPC when invoked with
+# `--use-apptainer` / `--use-singularity`.
+
+from pathlib import Path
+
+from compbench.pipeline.profile import load_profile, expand_matrix
+
+
+# ---- Config ---------------------------------------------------------------
+
+if "profile" in config:
+    _profile = load_profile(config["profile"])
+else:
+    # Loaded via --configfile: the profile YAML *is* the config dict.
+    from compbench.pipeline.profile import Profile
+    _profile = Profile(
+        name=config["name"],
+        datasets=config["datasets"],
+        codecs=config["codecs"],
+    )
+
+RESULTS_DIR = Path(config.get("results_dir", f"results/{_profile.name}"))
+CELLS = list(expand_matrix(_profile))
+CELL_BY_ID = {c.cell_id: c for c in CELLS}
+
+CONTAINER_BASE = config.get(
+    "container_base", "docker://ghcr.io/allenneuraldynamics/aind-ephys-pipeline-base:si-0.103.0"
+)
+
+# ---- Wildcards & I/O ------------------------------------------------------
+
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _cell_dir(cell_id: str) -> str:
+    return str(RESULTS_DIR / cell_id)
+
+
+rule all:
+    """Terminal target — produces the aggregated report."""
+    input:
+        RESULTS_DIR / "report.parquet",
+
+
+rule run_cell:
+    """One duct-wrapped `compbench run` invocation → metrics.json + duct-*."""
+    output:
+        metrics = RESULTS_DIR / "{cell_id}" / "metrics.json",
+        manifest = RESULTS_DIR / "{cell_id}" / "manifest.json",
+        duct_info = RESULTS_DIR / "{cell_id}" / "duct-info.json",
+    params:
+        cell = lambda w: CELL_BY_ID[w.cell_id],
+        cell_dir = lambda w: _cell_dir(w.cell_id),
+    threads: 1
+    resources:
+        mem_mb = 4096,
+        time_min = 30,
+    # container: CONTAINER_BASE   # opt-in — comment out for host-native runs
+    shell:
+        r"""
+        mkdir -p {params.cell_dir}
+        duct \
+            --output-prefix {params.cell_dir}/duct- \
+            --sample-interval 1 \
+            --report-interval 5 \
+            compbench run \
+                --input '{params.cell.dataset_spec}' \
+                --codec '{params.cell.codec}' \
+                --codec-params '{params.cell.codec_params_cli}' \
+                --output-dir {params.cell_dir}
+        """
+
+
+rule aggregate:
+    """Collect all cells into a single Parquet report."""
+    input:
+        [RESULTS_DIR / c.cell_id / "metrics.json" for c in CELLS],
+    output:
+        RESULTS_DIR / "report.parquet",
+    shell:
+        r"""
+        compbench report --results-dir {RESULTS_DIR} --output {output}
+        """

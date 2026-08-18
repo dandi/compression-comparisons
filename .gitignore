@@ -34,5 +34,8 @@ src/bwc/bin/
 results/
 .duct/
 
+# Snakemake local scratch (metadata, logs, incomplete markers)
+.snakemake/
+
 # Datalad — the datalad handler manages this itself, but noted here for clarity
 # (do NOT gitignore .datalad — it holds dataset metadata)
