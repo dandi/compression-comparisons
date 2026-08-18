@@ -44,6 +44,15 @@ def all_adapters() -> Iterable[type[CodecAdapter]]:
 
 
 # Import side-effect: register the built-in codecs.
+# Optional codecs — audio (FLAC, WavPack) require extra packages that may not
+# be available on every platform (e.g. wavpack-numcodecs ships glibc-specific
+# binaries). If the import fails, those codecs simply aren't registered.
+import contextlib as _contextlib  # noqa: E402
+
 from compbench.codecs import blosc as _blosc  # noqa: F401,E402
+from compbench.codecs import standard as _standard  # noqa: F401,E402
+
+with _contextlib.suppress(ImportError):
+    from compbench.codecs import audio as _audio  # noqa: F401
 
 __all__ = ["CodecAdapter", "all_adapters", "get", "names", "register"]

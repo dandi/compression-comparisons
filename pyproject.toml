@@ -32,6 +32,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+audio = [
+    "wavpack-numcodecs>=0.2",
+    # flac-numcodecs is optional and community-maintained; add here when a
+    # PyPI release we can pin to lands. Loader currently registers `flac`
+    # only if `flac_numcodecs` is importable.
+]
 test = [
     "pytest>=7.4",
     "pytest-cov>=4.1",
@@ -39,6 +45,10 @@ test = [
 ]
 devel = [
     "compbench[test]",
+    # Not [audio] — `wavpack-numcodecs` ships glibc-specific bundled binaries
+    # and fails to install on some distros (e.g. glibc 2.36 lacks a wheel).
+    # Add explicitly with `pip install -e .[devel,audio]` when it works on your
+    # box (Ubuntu 22.04/24.04, manylinux, containers).
     "ruff>=0.4",
     "mypy>=1.8",
     "pre-commit>=3.5",
