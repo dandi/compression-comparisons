@@ -1,0 +1,5 @@
+# T.261 lossless preset — EMG independent-channel coding.
+codec: t261
+params:
+  preset: combinedPresetEMG_IndepChannel_lossless
+  bit_depth: 16

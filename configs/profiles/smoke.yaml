@@ -12,3 +12,7 @@ codecs:
     params:
       level: 5
       shuffle: bit
+  - codec: t261
+    params:
+      preset: combinedPresetEEG_IndepChannel_lossless
+      bit_depth: 16

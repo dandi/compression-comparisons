@@ -1,0 +1,7 @@
+# T.261 lossless preset — EEG independent-channel coding.
+# Matches src/bwc/cfg/combinedPresetEEG_IndepChannel_lossless.cfg.
+# Bit-exact round-trip guaranteed.
+codec: t261
+params:
+  preset: combinedPresetEEG_IndepChannel_lossless
+  bit_depth: 16
