@@ -48,6 +48,7 @@ integration:
 
 .PHONY: smoke
 smoke:
+	@rm -rf $(SMOKE_CELL)     # idempotent — duct refuses to overwrite existing output-prefix files
 	@mkdir -p $(SMOKE_CELL)
 	duct \
 	    --output-prefix "$(SMOKE_CELL)/duct-" \
