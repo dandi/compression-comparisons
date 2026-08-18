@@ -58,6 +58,7 @@ The deliverable is **not** a paper; it is infrastructure + a reference report. A
 | Features                    | Multi-channel, mixed sample rates, independent & joint channel coding, blocking + indexing for selective random access                                                                                                                                                                                      |
 | DICOM adoption              | WG-32 work item **2022-09-A** — new transfer syntaxes defined in DICOM Sup 253                                                                                                                                                                                                                              |
 | Reference software           | **Publicly cloneable** at [`https://vcgit.hhi.fraunhofer.de/vceg-sw/bwc`](https://vcgit.hhi.fraunhofer.de/vceg-sw/bwc) under the **Clear BSD** license. Created 2025-01-09, 191 commits, 7 tagged releases as of 2026-08. Same Fraunhofer HHI GitLab that hosts JVET's VTM/HM/JM. No ITU membership required. |
+| Specification PDF            | **Not yet in the public ITU-T database** as of 2026-08-18 — `https://www.itu.int/rec/T-REC-T.261` returns nothing. Publication lag from July 2024 approval is normal for ITU-T; expect it to appear over time. Not on the critical path — the reference software is our primary source. |
 
 **Implication for our benchmark:** vendoring is straightforward. Pin `vceg-sw/bwc` as a git submodule (or a fetched tag inside `pyproject.toml`'s build backend) and produce a normal `manylinux` wheel of `t261-numcodecs` that can go to PyPI. The ITU-T specification PDF itself is a separate concern (publication lag; requires an ITU account for free download, membership for TIES-gated drafts), but the *code* is unencumbered.
 
@@ -134,7 +135,10 @@ compression-comparisons/                (this repo — datalad dataset, no-annex
 │   │   └── report/                     Parquet aggregator (joins compbench outputs + con-duct .jsonl) + Quarto
 │   └── t261_numcodecs/                 sub-package: numcodecs wrapper around ../bwc
 ├── containers/
-│   └── Dockerfile                      main image: python + spikeinterface + numcodecs + con-duct + kilosort4 + t261-numcodecs
+│   ├── compbench-base.Dockerfile       FROM ghcr.io/allenneuraldynamics/aind-ephys-pipeline-base:si-0.103.0
+│   │                                   adds: con-duct, compbench, t261-numcodecs, wavpack-numcodecs
+│   ├── compbench-ks25.Dockerfile       FROM ghcr.io/…/aind-ephys-spikesort-kilosort25:si-0.103.0 + compbench (CPU)
+│   └── compbench-ks4.Dockerfile        FROM ghcr.io/…/aind-ephys-spikesort-kilosort4:si-0.103.0 + compbench (CUDA)
 ├── configs/
 │   ├── datasets/*.yaml                 one YAML per benchmark dataset (name, loader, params, ground-truth?)
 │   ├── codecs/*.yaml                   one YAML per codec-config (name, params, lossy?, bps?)
@@ -189,6 +193,28 @@ Design constraints:
 - **Fail loud.** Non-zero exit on any measurement failure; partial metrics never silently promoted.
 - **No hidden state.** All parameters come from CLI flags or the referenced YAMLs; no `~/.compbench` config file.
 - **Codec registration via entry points** (`numcodecs`-style). Third-party codec wheels (e.g. `t261-numcodecs`) become available automatically without editing `compbench`.
+
+### 4.1a Relationship between `src/bwc/` and `src/t261_numcodecs/`
+
+Two directories, two roles:
+
+| Path                     | Role                                          | Origin                                            | Modified by us?                             |
+| ------------------------ | --------------------------------------------- | ------------------------------------------------- | ------------------------------------------- |
+| `src/bwc/`               | Upstream C++20 reference codec ("the engine") | Datalad subdataset of `vcgit.hhi.fraunhofer.de/vceg-sw/bwc`, pinned to tag `BWC-6.0` | **No.** Never patched in-tree. Any fix goes upstream as a PR.  |
+| `src/t261_numcodecs/`    | Our Python wrapper package ("the adapter")    | Written by us                                      | Yes.                                        |
+
+At build time, `src/t261_numcodecs/pyproject.toml` uses `scikit-build-core` to compile a Python extension module. The extension is built from:
+
+- **Ours:** a small pybind11 C++ shim + an in-memory `PacketWriteIf` / `PacketReadIf` implementation (~200–300 LoC total) living under `src/t261_numcodecs/`.
+- **Upstream:** the sources of `libCommonLib` / `libEncLib` / `libDecLib` referenced *by path* from `../bwc/source/Lib/…` — either compiled directly into our extension, or linked against static libs built from `../bwc/`.
+
+The Python-side `numcodecs.Codec` subclass in `src/t261_numcodecs/t261_numcodecs/__init__.py` imports the extension and exposes `T261(preset=..., level=..., bps=...)`. The `numcodecs` entry point in `pyproject.toml` makes `compbench list-codecs` pick it up automatically.
+
+Rationale for keeping them as two sibling directories rather than nesting `src/bwc/` under `src/t261_numcodecs/vendor/`:
+
+- `src/bwc/` is a datalad subdataset — cleaner at the repo root of `src/` than buried in the wrapper package.
+- Any *other* consumer in this repo (e.g. a benchmark script that shells out to `EncoderApp` for a sanity check) can also reference `src/bwc/` directly without going through the wrapper.
+- The wrapper package is portable — if we later split `t261-numcodecs` into its own PyPI-published repo, we replace the `../bwc/` path reference with a git submodule at `vendor/bwc/` inside that repo. No other changes.
 
 ### 4.2 The T.261 `numcodecs` wrapper — key design points
 
@@ -322,8 +348,9 @@ Ordered by increasing scope; each phase is independently useful and PR-sized.
 
 - Loaders for SpikeInterface + MEArec.
 - Codecs registered via entry points: `blosc-{lz4,lz4hc,zlib,zstd}`, `gzip`, `lzma`, `zstd`, `flac`, `wavpack` (via existing `wavpack-numcodecs`).
-- Snakemake DAG enumerates (dataset × codec × level × chunk × shuffle); each rule wraps one `duct compbench run …` cell → writes `metrics.json` + `duct-*.jsonl` → aggregator joins to Parquet.
-- Reproduce **Figure 2 & Figure 3** of the paper for at least one Buccino et al. dataset (e.g. one IBL NP1 recording) to validate the framework.
+- Snakemake DAG enumerates (dataset × codec × level × chunk × shuffle); each rule wraps one `duct compbench run …` cell in the `compbench-base` container (CPU-only) → writes `metrics.json` + `duct-*.jsonl` → aggregator joins to Parquet.
+- Sorter-in-the-loop cells (lossy sweep) run in `compbench-ks25` per `configs/profiles/paper.yaml` — this matches the paper's Kilosort 2.5 exactly.
+- Reproduce **Figure 2 & Figure 3** of the paper on at least one Buccino et al. dataset (IBL NP1 recording, plus one AIND NP1 for sanity) to validate the framework.
 
 **Verify:** CR and ×RT numbers match paper within ± 5%. Peak-RSS numbers from con-duct rank codecs plausibly (e.g. `lzma` > `blosc-zstd`).
 
@@ -355,17 +382,19 @@ Concrete steps:
 
 - Add T.261 to `configs/codecs/*.yaml` with a matrix of `level`, `lossless/lossy/near-lossless`, `bps` targets matching WavPack-Hybrid's range so plots are apples-to-apples.
 - Implement PRD/PRDN, random-access latency.
-- Run full sweep on the same IBL/AIND datasets Buccino et al. used → produce comparison plots (T.261 vs WavPack vs FLAC vs blosc-zstd).
+- Run the full paper-comparable sweep on the exact IBL/AIND datasets Buccino et al. used → produce apples-to-apples plots (T.261 vs WavPack vs FLAC vs blosc-zstd on identical inputs).
+- Deliver the first public report: "T.261 in the context of Buccino et al. 2023."
 
-**Verify:** T.261 sits on or beats WavPack on lossless CR (its design claim); document any surprises.
+**Verify:** T.261 sits on or beats WavPack on lossless CR (its design claim); document any surprises. Reader can compare T.261 directly against the paper's figures without any dataset caveats.
 
-### Phase 4 — Modality extension (1 week)
+### Phase 4 — Dataset extension (scheduled after Phase 3 report ships)
 
-- Add EDF/BDF loader.
-- Curate 3–5 public ECG/EEG datasets (PhysioNet MIT-BIH, TUH EEG, etc.).
-- Rerun sweep; produce a second report focused on clinical modalities.
+Two directions, both optional relative to the primary Phase-3 goal:
 
-**Verify:** DICOM WG-32 members can review comparable numbers for their target modalities.
+- **Ephys extension:** Neuropixels v2 "quads" and other newer DANDI holdings — pick 2–3 recordings representative of the current data DANDI is ingesting.
+- **Clinical extension:** EDF/BDF loader + 3–5 public ECG/EEG datasets (PhysioNet MIT-BIH, TUH EEG, etc.), covering T.261's clinical envelope. Coordinate dataset choice with WG-32 co-chairs at this point (deferred action #6/#7 in §10).
+
+**Verify:** framework accepts new datasets via one YAML each, no Python edits; per-modality reports render from the same aggregator.
 
 ### Phase 5 — Polish + publish (1 week)
 
@@ -375,14 +404,22 @@ Concrete steps:
 
 ---
 
-## 6. Open decisions (need user input)
+## 6. Decisions (locked 2026-08-18)
 
-1. **Orchestrator:** Snakemake (recommended) vs. Nextflow (matches `aind-ephys-hybrid-benchmark`) vs. plain `make` + Python.
-2. **Container base:** `python:3.12-slim` (minimal) vs. `nvidia/cuda:12-runtime` (needed if we want Kilosort 4 GPU spike-sorting in-the-loop for lossy evaluation).
-3. **Spike-sorter:** stay on **Kilosort 2.5** for exact paper reproduction, or upgrade to **Kilosort 4** / **spykingcircus2** for current relevance. (Probably: both — 2.5 for reproduction, 4 as default going forward.)
-4. **T.261 wrapper licence & hosting:** MIT-licensed wrapper source, ITU-owned bitstream sources fetched at build time. Confirm we can publish the *wrapper* publicly without touching ITU redistribution rights (likely yes — same model as libFLAC, x265).
-5. **Repo home for the wrapper:** here (`dandi/compression-comparisons/src/t261_numcodecs/`) or a separate sibling repo (`dandi/t261-numcodecs`)? Separate repo is cleaner for reuse by other projects (e.g. DANDI ingest, DICOM tools).
-6. **Datasets for the first public report:** re-use exact Buccino et al. IBL / AIND recordings (best for direct comparison), or start with a DANDI subset (best for showing DANDI value)?
+1. **Orchestrator: Snakemake.** ✓ Confirmed. Python-native, cleaner SLURM/K8s integration than raw scripts, no JVM dependency.
+2. **Containers: reuse the AIND per-step image family from `ghcr.io/AllenNeuralDynamics/…`** (see [`aind-ephys-pipeline` architecture](https://aind-ephys-pipeline.readthedocs.io/en/latest/architecture.html)), pinned at tag `si-0.103.0` to match their published pipeline. Three derived images (§4 layout):
+   - `compbench-base`  — CPU-only; FROM `aind-ephys-pipeline-base`; hosts `compbench` + `t261-numcodecs` + `wavpack-numcodecs` + `con-duct`. Used for all compression cells and the compression-only ×RT/CR sweep.
+   - `compbench-ks25` — CPU-only; FROM `aind-ephys-spikesort-kilosort25`; adds `compbench`. Used for **paper-reproduction lossy runs** (KS2.5 was the paper's sorter).
+   - `compbench-ks4`  — **CUDA-required**; FROM `aind-ephys-spikesort-kilosort4`; adds `compbench`. Used when the configured sorter is KS4 (default for new-dataset runs).
+   The per-step split means the compression sweep never pays the GPU-image size/pull cost; only lossy-eval cells that actually sort do.
+3. **Spike sorter: configurable per run; paper reproduction pins Kilosort 2.5.** `configs/profiles/paper.yaml` → sorter=`kilosort2_5`, image=`compbench-ks25`. `configs/profiles/full.yaml` (new-dataset runs) → sorter=`kilosort4`, image=`compbench-ks4`. `spykingcircus2` also registered but not on the default path.
+4. **Wrapper hosting: `src/t261_numcodecs/` in this repo for now.** Rationale in §4.1a. If external consumers (DANDI ingest, pynwb, xarray) start depending on it, we split it into `dandi/t261-numcodecs` — the wrapper package layout is designed to make that move trivial (swap `../bwc/` path for `vendor/bwc/` submodule; no other changes).
+5. **First public report uses Buccino et al.'s exact datasets** — the goal is to slot T.261 into the *same* comparison the paper made, so the reader sees T.261 alongside FLAC / WavPack / blosc-zstd on identical inputs. Expansion to new datasets — including Neuropixels v2 "quads" and other DANDI holdings — is explicitly a follow-up phase, not a Phase-3 blocker.
+
+**Deferred (revisit when we have first results):**
+
+- Emailing Buccino/Siegle (Allen) with attribution note.
+- Emailing DICOM WG-32 co-chairs for preferred ECG/EEG datasets.
 
 ---
 
@@ -426,10 +463,10 @@ Concrete steps:
 ## 10. Immediate next actions (if this plan is approved)
 
 1. ~~Verify a Linux build of `vceg-sw/bwc`.~~ **Done 2026-08-17** — see §2.3. Builds on GCC 12 with `-Wno-restrict`; lossless round-trip byte-exact at ~11× CR on synthetic EEG-like input.
-2. Ask WG-32 co-chairs whether they have a *preferred* set of ECG/EEG datasets they want benchmarked (avoids us picking datasets they'll then dispute).
-3. Confirm with the Allen Institute (Buccino, Siegle) that a reimplementation-with-attribution is welcome — a friendly upstream is worth an email.
-4. Land Phase 0 (scaffold + CLI + con-duct wiring + CI smoke) in this repo — self-contained, unblocks everything else.
-5. (Nice-to-have, not on critical path) Register / log in to an ITU-T account to download the T.261 specification PDF once ITU publishes it, for reference while implementing the wrapper.
+2. **Deferred until first results.** Ask WG-32 co-chairs whether they have a preferred set of ECG/EEG datasets.
+3. **Deferred until first results.** Confirm with the Allen Institute (Buccino, Siegle) that a reimplementation-with-attribution is welcome.
+4. **Now: land Phase 0** (scaffold + `compbench` CLI + con-duct wiring + CI smoke) in this repo — self-contained, unblocks everything else.
+5. (Nice-to-have, low priority) Watch for the T.261 specification PDF to appear at `https://www.itu.int/rec/T-REC-T.261` — as of 2026-08-18 it is not yet published. Not on the critical path; the reference software is our primary source.
 
 ---
 
