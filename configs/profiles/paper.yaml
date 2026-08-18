@@ -1,0 +1,52 @@
+# Paper reproduction profile — Buccino et al. 2023 Fig 2 & 3 lossless sweep,
+# extended with the T.261 / H.BWC codec.
+#
+# STATUS: scaffolded. The `datasets:` list below currently points at
+# synthetic-tiny (so the pipeline runs end-to-end without external data).
+# To reproduce the paper, replace those entries with YAML configs pointing
+# at the exact IBL / AIND NWB recordings the paper used — see
+# .specify/specs/paper-datasets.md (to be written when data is fetched).
+#
+# Ephys use lives outside T.261's clinical envelope, but stays inside its
+# research envelope (up to 40 kHz, 16–24 bpp). Neuropixels-1.0 recordings
+# at 30 kHz × 384 ch × 16 bit are a fair stress test.
+
+name: paper
+datasets:
+  # PLACEHOLDER — will be replaced with real paper datasets once fetched.
+  - configs/datasets/synthetic-tiny.yaml
+
+codecs:
+  # blosc family — 4 inner codecs × 2 levels each. Matches paper's Fig 2 axis.
+  - {codec: blosc-lz4,   params: {level: 3, shuffle: byte}}
+  - {codec: blosc-lz4,   params: {level: 9, shuffle: byte}}
+  - {codec: blosc-lz4hc, params: {level: 3, shuffle: byte}}
+  - {codec: blosc-lz4hc, params: {level: 9, shuffle: byte}}
+  - {codec: blosc-zlib,  params: {level: 3, shuffle: byte}}
+  - {codec: blosc-zlib,  params: {level: 9, shuffle: byte}}
+  - {codec: blosc-zstd,  params: {level: 3, shuffle: byte}}
+  - {codec: blosc-zstd,  params: {level: 9, shuffle: byte}}
+
+  # Standard codecs used directly (no blosc framing) — same axis as paper.
+  - {codec: gzip,        params: {level: 5}}
+  - {codec: gzip,        params: {level: 9}}
+  - {codec: zlib,        params: {level: 5}}
+  - {codec: zlib,        params: {level: 9}}
+  - {codec: lz4,         params: {acceleration: 1}}
+  - {codec: zstd,        params: {level: 3}}
+  - {codec: zstd,        params: {level: 22}}
+  - {codec: lzma,        params: {preset: 6}}
+
+  # Audio codecs — WavPack (paper's winner) + FLAC.
+  # These are only registered if the corresponding packages are installable;
+  # skip silently on platforms where wavpack-numcodecs's bundled binary
+  # doesn't match glibc.
+  - {codec: wavpack,     params: {level: 1}}
+  - {codec: wavpack,     params: {level: 2}}
+  # - {codec: flac,        params: {level: 5}}  # add when flac-numcodecs lands
+
+  # T.261 / H.BWC — the codec this benchmark exists to compare.
+  # EEG independent-channel lossless is the closest analogue to the paper's
+  # audio-codec settings (WavPack lossless / FLAC).
+  - {codec: t261,        params: {preset: combinedPresetEEG_IndepChannel_lossless}}
+  - {codec: t261,        params: {preset: combinedPresetEEG_lossless}}   # joint-channel
