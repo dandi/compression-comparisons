@@ -38,9 +38,12 @@ can compare medians vs paper's reported means. The "~2.7 / ~2.9 / ~2.4"
 paper numbers in the earlier draft were my guesses, not citations.
 
 What we CAN say from this run:
-- **T.261 IndepChannel lossless (CR 6.90) is the highest lossless CR
-  measured here**, 105 % above lzma (3.36) and 146 % above blosc-zstd L9
-  (2.80).
+- **T.261 IndepChannel lossless (CR 6.90) is the highest *general-purpose*
+  lossless CR in this sweep**, 105 % above lzma (3.36) and 146 % above
+  blosc-zstd L9 (2.80). WavPack — the paper's lossless winner at
+  ~3.6 mean-of-NP1 — was excluded from this profile; see
+  `paper-with-wavpack.yaml`. Direct T.261-vs-WavPack claim needs that
+  profile to run.
 - The **rankings** of the general-purpose codecs match the paper Fig 2
   order (which uses raw data, and the same ranking holds after band-pass):
   lzma > zstd L22 > blosc-zstd L9 > blosc-zlib > gzip ≈ zlib > blosc-lz4hc
@@ -52,8 +55,13 @@ What we CAN say from this run:
 ## Headline
 
 **T.261 IndepChannel lossless (CR 6.90) beats every general-purpose lossless
-codec by 105 %.** T.261 lossy QP=1.5 (CR 8.76, RMSE 0.41) more than doubles
-compression over lzma at imperceptible distortion. T.261 QP=8 hits CR 23.5.
+codec in this sweep by 105 %.** WavPack was not run in this profile — see
+`paper-with-wavpack.yaml` to include it. T.261 lossy QP=1.5 (CR 8.76,
+PRDN ≈ 4.9 % of signal RMS on band-pass data) more than doubles compression
+over lzma; distortion level is small but not "imperceptible" (spike-sorting
+fidelity not yet evaluated — see Caveats). T.261 QP=8 hits CR 23.5 at
+PRDN ≈ 18 % — likely severe degradation of small-amplitude spikes;
+requires sorting-fidelity eval before use.
 
 ## Caveats
 

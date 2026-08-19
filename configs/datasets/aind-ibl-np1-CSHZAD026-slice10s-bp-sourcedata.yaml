@@ -1,0 +1,12 @@
+# Portable band-pass variant — sourcedata-relative path, matches paper's
+# 300-6000 Hz preprocessing. Use from within the STAMPED study root.
+loader: aind-benchmark
+params:
+  path: sourcedata/aind-ephys-compression/ibl-np1/CSHZAD026_2020-09-04_probe00
+  start_s: 0.0
+  duration_s: 10.0
+preprocessing:
+  - kind: bandpass
+    low_hz: 300
+    high_hz: 6000
+    order: 4

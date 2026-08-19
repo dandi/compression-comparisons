@@ -1,0 +1,16 @@
+# Portable variant of the CSHZAD026 slice YAML — path resolves relative to
+# the STAMPED study's `sourcedata/` subdataset (the intended layout when
+# running via DEPLOY.md, not the local-scratch path used during development).
+#
+# Use this from within the STAMPED study root:
+#     snakemake -s code/compression-comparisons-tools/src/compbench/pipeline/Snakefile \
+#         --configfile code/compression-comparisons-tools/configs/profiles/paper-real.yaml \
+#         --config results_dir=derivatives/compbench-$(date -I)
+# after fetching the recording via
+#     datalad -C sourcedata/aind-ephys-compression get \
+#         ibl-np1/CSHZAD026_2020-09-04_probe00/traces_cached_seg0.raw
+loader: aind-benchmark
+params:
+  path: sourcedata/aind-ephys-compression/ibl-np1/CSHZAD026_2020-09-04_probe00
+  start_s: 0.0
+  duration_s: 10.0

@@ -316,7 +316,6 @@ if _AVAILABLE:
             bit_depth: int | str = 16,
             step_size_for_qp: float | str | None = None,
             max_abs_delta_qp: int | str | None = None,
-            **kw: Any,
         ) -> None:
             step = float(step_size_for_qp) if step_size_for_qp not in (None, "", "None") else None
             delta = int(max_abs_delta_qp) if max_abs_delta_qp not in (None, "", "None") else None
@@ -325,7 +324,6 @@ if _AVAILABLE:
                 bit_depth=int(bit_depth),
                 step_size_for_qp=step,
                 max_abs_delta_qp=delta,
-                **kw,
             )
             self._preset = preset
             self._bit_depth = int(bit_depth)
@@ -347,3 +345,75 @@ if _AVAILABLE:
                 step_size_for_qp=self._step_size_for_qp,
                 max_abs_delta_qp=self._max_abs_delta_qp,
             )
+
+        def describe(self) -> dict[str, Any]:
+            """Extend the base description with BWC binary + config provenance.
+
+            Reproducibility (R2-H6): a manifest with just `preset` name is
+            insufficient — two runs against different BWC checkouts could
+            produce different bitstreams with no way to tell from the
+            manifest. We capture the BWC git SHA, the encoder version banner,
+            and the resolved encoder/decoder paths.
+            """
+            info = super().describe()
+            info["bwc"] = {
+                "bwc_git_sha": _bwc_git_sha(),
+                "encoder_version": _bwc_encoder_version(),
+                "encoder_path": str(ENCODER) if ENCODER else None,
+                "decoder_path": str(DECODER) if DECODER else None,
+                "cfg_dir": str(CFG_DIR) if CFG_DIR else None,
+            }
+            return info
+
+
+def _bwc_git_sha() -> str | None:
+    """Try to resolve the git SHA of the BWC checkout that produced ENCODER.
+
+    Falls back to None on any failure — never raises. Called at manifest-build
+    time; slow-path acceptable (one `git rev-parse` per encode is negligible).
+    """
+    if ENCODER is None:
+        return None
+    # ENCODER is typically <bwc_root>/bin/release/EncoderApp → parent[2] = bwc root
+    try:
+        bwc_root = ENCODER.resolve().parents[2]
+        out = subprocess.check_output(
+            ["git", "-C", str(bwc_root), "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=3,
+        )
+        return out.strip() or None
+    except (subprocess.SubprocessError, FileNotFoundError, IndexError):
+        return None
+
+
+_BWC_VERSION_CACHE: str | None = None
+
+
+def _bwc_encoder_version() -> str | None:
+    """Best-effort BWC version identifier.
+
+    The encoder's runtime banner ("Biomedical Waveform Codec (BWC),
+    encoder ver. N.M") only prints during actual encode; too expensive
+    to trigger at import. We use `git describe --tags` on the BWC
+    checkout instead — that returns e.g. `BWC-6.0-2-g34c2a2a` which
+    identifies both the tagged version and any post-tag drift.
+    """
+    global _BWC_VERSION_CACHE
+    if _BWC_VERSION_CACHE is not None:
+        return _BWC_VERSION_CACHE
+    if ENCODER is None:
+        return None
+    try:
+        bwc_root = ENCODER.resolve().parents[2]
+        out = subprocess.check_output(
+            ["git", "-C", str(bwc_root), "describe", "--tags", "--always"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=3,
+        )
+        _BWC_VERSION_CACHE = out.strip() or None
+        return _BWC_VERSION_CACHE
+    except (subprocess.SubprocessError, FileNotFoundError, IndexError):
+        return None

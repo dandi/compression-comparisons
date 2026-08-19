@@ -49,7 +49,20 @@ def _bandpass(
     filtered = filtfilt(b, a, working, axis=0)
     if np.issubdtype(original_dtype, np.integer):
         info = np.iinfo(original_dtype)
-        filtered = np.clip(np.round(filtered), info.min, info.max)
+        # Assert no silent clipping — biases every downstream CR/RMSE if
+        # the filter output would saturate the integer container. Common
+        # for ECG with large baseline wander; less so for band-passed
+        # neural data but a hard-fail is better than a silent bias.
+        rounded = np.round(filtered)
+        n_clip = int(np.sum((rounded < info.min) | (rounded > info.max)))
+        if n_clip > 0:
+            raise ValueError(
+                f"bandpass: filter output would clip {n_clip} samples to "
+                f"{original_dtype} range [{info.min}, {info.max}] "
+                f"(max abs = {np.max(np.abs(rounded)):.1f}). Convert input "
+                f"to a wider dtype (e.g. float32) or narrow the band."
+            )
+        filtered = rounded
     return np.ascontiguousarray(filtered.astype(original_dtype))
 
 

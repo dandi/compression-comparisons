@@ -86,7 +86,24 @@ def run_cell(
 
     cr = metrics.compression_ratio(ds.nbytes, len(encoded))
     err = metrics.rmse(ds.data, reconstructed)
+    prd_val = metrics.prd(ds.data, reconstructed)
+    prdn_val = metrics.prdn(ds.data, reconstructed)
+    # Band-limited RMSE (Buccino Fig 4-6 methodology) — the spike-band
+    # distortion metric. Only meaningful if the sample rate is high enough
+    # to have a 300-6000 Hz band; skip on low-rate signals (e.g. synthetic
+    # 1 kHz test data would fail Nyquist).
+    band_rmse: float | None = None
+    if ds.sample_rate_hz > 12000.0:
+        try:
+            band_rmse = metrics.rmse_band_limited(
+                ds.data, reconstructed, ds.sample_rate_hz, 300.0, 6000.0
+            )
+        except (ValueError, ImportError):
+            band_rmse = None
     exact = metrics.round_trip_ok(ds.data, reconstructed)
+    # Signal RMS (input scale) — needed to interpret RMSE in signal units
+    # ("PRDN via signal std" per R1 review). Compute once per cell.
+    signal_std = float(np.std(ds.data.astype(np.float64))) if ds.data.size else 0.0
 
     duration = ds.duration_s
     result_metrics = {
@@ -98,8 +115,14 @@ def run_cell(
         "encode_xrt": (duration / enc_dt) if enc_dt > 0 else None,
         "decode_xrt": (duration / dec_dt) if dec_dt > 0 else None,
         "rmse": err,
+        "rmse_band_limited_300_6000": band_rmse,
+        "prd_percent": prd_val,
+        "prdn_percent": prdn_val,
+        "signal_std": signal_std,
+        "rmse_over_signal_std_percent": (100.0 * err / signal_std) if signal_std > 0 else 0.0,
         "round_trip_ok": exact,
         "expected_lossless": not adapter.lossy,
+        "lossless_violation": (not adapter.lossy) is False and exact is False,
     }
 
     manifest = build_manifest(

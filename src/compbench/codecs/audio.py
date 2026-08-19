@@ -11,7 +11,7 @@ registered (see `compbench.codecs.__init__`'s try/except).
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from numcodecs.abc import Codec
 
@@ -30,9 +30,9 @@ else:
 
         name: ClassVar[str] = "wavpack"
 
-        def __init__(self, level: int | str = 2, bps: float | str | None = None, **kw: Any) -> None:
+        def __init__(self, level: int | str = 2, bps: float | str | None = None) -> None:
             bps_num = float(bps) if bps not in (None, "", "None") else None
-            super().__init__(level=int(level), bps=bps_num, **kw)
+            super().__init__(level=int(level), bps=bps_num)
             self._level = int(level)
             self._bps = bps_num
 
@@ -59,8 +59,8 @@ else:
         name: ClassVar[str] = "flac"
         lossy: ClassVar[bool] = False
 
-        def __init__(self, level: int | str = 5, **kw: Any) -> None:
-            super().__init__(level=int(level), **kw)
+        def __init__(self, level: int | str = 5) -> None:
+            super().__init__(level=int(level))
             self._level = int(level)
 
         def make_codec(self) -> Codec:

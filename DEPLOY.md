@@ -6,6 +6,16 @@ CPU (and, for spike-sorting-in-the-loop cells, a GPU). It picks up right
 where the first-run results (`results/dandi-t261-compression-study/derivatives/compbench-2026-08-19-CSHZAD026-slice10s/`)
 leave off.
 
+## Current state (2026-08-19)
+
+Two working reproductions live under the STAMPED study at
+`results/dandi-t261-compression-study/derivatives/` — raw and
+band-pass, both on `CSHZAD026` at 10 s slice. Neither the study repo
+nor the tool repo has been pushed to any remote yet, so the "clone from
+`<study-remote>`" instructions in §1 below are aspirational — until
+someone pushes, the study exists only on Yaroslav's dev machine. If
+you're deploying elsewhere, use the sync approach in §1a below.
+
 ## Target hardware
 
 Recommendations for the "full paper reproduction on 16 recordings"
@@ -37,19 +47,41 @@ pipx install uv
 
 ### 1. Clone the study, the tool, and the source data
 
-```bash
-# The STAMPED study (top-level, tiny)
-git clone <study-remote> dandi-t261-compression-study
-cd dandi-t261-compression-study
-datalad get code/compression-comparisons-tools   # the tool code
-datalad get -r sourcedata/aind-ephys-compression # register the S3 mirror
+**IMPORTANT — study is not yet on a public remote.** The instructions
+below assume the study lives at `<study-remote>` on GitHub or a
+DataLad-mirrored host. Until that push happens, use §1a below to sync
+from Yaroslav's dev machine (rsync/scp/datalad-siblings) or from a
+sibling `dandi/compression-comparisons` GitHub repo for the tool
+code + `///aind-benchmark-data/ephys-compression` for source data.
 
-# Pull the raw ephys data (this is the slow step — 100s of GB)
+```bash
+# The STAMPED study (top-level, tiny). --recursive registers subdatasets;
+# annexed files are NOT pulled yet.
+datalad clone --recursive <study-remote> dandi-t261-compression-study
+cd dandi-t261-compression-study
+
+# Pull the raw ephys data (this is the slow step — 100s of GB).
 # Everything at once:
 datalad -C sourcedata/aind-ephys-compression get .
-# OR a subset:
-datalad -C sourcedata/aind-ephys-compression get ibl-np1  # ~110 GB
-datalad -C sourcedata/aind-ephys-compression get aind-np1 # ~135 GB
+# OR a subset (recommended for first run):
+datalad -C sourcedata/aind-ephys-compression get \
+    ibl-np1/CSHZAD026_2020-09-04_probe00/traces_cached_seg0.raw   # ~28 GB, one recording
+```
+
+### 1a. Sync from Yaroslav's dev machine (until the study has a remote)
+
+```bash
+# On the dev machine (assuming study is at ~/proj/dandi/compression-comparisons/results/dandi-t261-compression-study):
+tar czf /tmp/study.tar.gz -C ~/proj/dandi/compression-comparisons/results dandi-t261-compression-study
+# On the target machine:
+scp yaroslav@dev:/tmp/study.tar.gz . && tar xzf study.tar.gz && cd dandi-t261-compression-study
+# The tool code subdataset's .gitmodules currently points at a local absolute path — fix it:
+git config -f .gitmodules submodule.code/compression-comparisons-tools.url https://github.com/dandi/compression-comparisons
+git submodule sync
+datalad get -r code/compression-comparisons-tools
+# sourcedata subdataset still points at ///aind-benchmark-data/ephys-compression — works out of the box.
+datalad get -r sourcedata/aind-ephys-compression   # registers only; files still annexed
+datalad -C sourcedata/aind-ephys-compression get ibl-np1/CSHZAD026_2020-09-04_probe00/traces_cached_seg0.raw
 ```
 
 ### 2. Build the container image
@@ -74,22 +106,16 @@ podman build -t compbench-ks4:local -f containers/compbench-ks4.Dockerfile .
 
 ### 3. Point profiles at the real data
 
-Edit `configs/datasets/aind-ibl-np1-CSHZAD026-slice10s-bp.yaml` (and
-similar) to point at the sourcedata paths inside the study:
+Use the `-sourcedata` variant of the dataset YAMLs — they point at
+paths relative to the STAMPED study root (`sourcedata/aind-ephys-compression/...`):
 
-```yaml
-loader: aind-benchmark
-params:
-  path: ../../sourcedata/aind-ephys-compression/ibl-np1/CSHZAD026_2020-09-04_probe00
-  # duration_s:  # unset → encode the full 1200 s recording
-preprocessing:
-  - kind: bandpass
-    low_hz: 300
-    high_hz: 6000
-    order: 4
-```
+- `configs/datasets/aind-ibl-np1-CSHZAD026-slice10s-sourcedata.yaml` — raw
+- `configs/datasets/aind-ibl-np1-CSHZAD026-slice10s-bp-sourcedata.yaml` — band-pass
 
-(The path is relative to the tool checkout at `code/compression-comparisons-tools/`.)
+Then edit `configs/profiles/paper-real.yaml`'s `datasets:` list to
+reference the `-sourcedata` variant instead of the dev-machine scratch
+path. To encode the full 1200 s recording (paper setting) instead of
+the 10 s slice, drop the `duration_s` field from the dataset YAML.
 
 For the paper-comparable full sweep, add one dataset YAML per recording
 under `configs/datasets/` and reference them all in
@@ -125,8 +151,29 @@ apptainer exec --bind $PWD:/work --pwd /work compbench-base.sif \
 ```
 
 **Wall-time budget:** 16 recordings × 21 cells = 336 cells. Median cell
-walltime seen so far is ~30 s (blosc) to ~600 s (T.261 with QP). At 32
-parallel cores, the whole sweep should complete in **4–10 hours**.
+walltime on 10 s slices was ~30 s (blosc) to ~600 s (T.261 with QP). At
+1200 s slices (paper setting) each T.261 cell scales ~120× → hours per
+cell. See §"Known scale walls" below for the realistic numbers and
+required mitigations before running at 1200 s.
+
+**Note on `--keep-going`:** the Makefile's `paper` / `full` targets pass
+`--keep-going` by default so a single failed cell (T.261 timeout, OOM)
+doesn't block the report of the remaining cells. The aggregator uses
+`rglob("metrics.json")` and tolerates missing cells.
+
+**Known scale walls (from R5 reviewer, 2026-08-19):**
+
+1. **Bandpass at 1200 s OOMs on <200 GB RAM boxes.** `filtfilt` on 27 GB
+   int16 promotes to 110 GB float64 + internal buffers → ~200-250 GB
+   peak. Mitigation not landed yet — chunk-along-channels or use
+   `sosfiltfilt` on float32.
+2. **T.261 joint-channel EEG lossless times out.** Even at 10 s it
+   exceeds 30 min. At 1200 s it's likely 60+ hours per cell. Exclude
+   from `paper-real.yaml` or chunk by channel-group until Phase 2b
+   pybind11 wrapper is ready.
+3. **Memory-bound parallelism.** Peak RSS per 10 s cell is 2-3 GB; at
+   1200 s expect 24-30 GB. On c7i.16xl (128 GB) only ~4 cells run in
+   parallel. Use r7i.16xl (512 GB) for effective 17-way parallelism.
 
 **Adding the joint-channel T.261 lossless cell:** on 384 ch × 10 s data
 this cell exceeds 30 min. On 384 ch × 1200 s (full recording) it will

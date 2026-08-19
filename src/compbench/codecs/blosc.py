@@ -4,7 +4,7 @@ the paper's terminology (`blosc-lz4`, `blosc-lz4hc`, `blosc-zlib`, `blosc-zstd`)
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from numcodecs import Blosc
 from numcodecs.abc import Codec
@@ -20,8 +20,8 @@ class _BloscAdapter(CodecAdapter):
 
     _cname: ClassVar[str] = ""
 
-    def __init__(self, level: int | str = 3, shuffle: str = "byte", **kw: Any) -> None:
-        super().__init__(level=int(level), shuffle=shuffle, **kw)
+    def __init__(self, level: int | str = 3, shuffle: str = "byte") -> None:
+        super().__init__(level=int(level), shuffle=shuffle)
         if shuffle not in _SHUFFLE:
             raise ValueError(f"shuffle must be one of {list(_SHUFFLE)}; got {shuffle!r}")
         self._level = int(level)

@@ -32,17 +32,27 @@ is beyond what the subprocess stopgap can bound cheaply).
 
 ## Findings
 
-1. **T.261 IndepChannel lossless (CR 3.80) is the best lossless codec on
-   this data** — 46 % higher CR than the next-best (lzma preset 6) and 64 %
-   higher than the paper's recommended blosc-zstd L9.
+1. **T.261 IndepChannel lossless (CR 3.80) is the best *general-purpose*
+   lossless codec in this sweep** — 46 % higher CR than the next-best
+   (lzma preset 6) and 64 % higher than blosc-zstd L9. NOTE: WavPack
+   (which the paper found the best lossless codec at ~3.6 mean-of-NP1)
+   was excluded from this profile — see `paper-with-wavpack.yaml` for
+   the profile that includes it. Direct T.261-vs-WavPack claim needs
+   that profile to run first.
 
-2. **T.261 QP=1.5 (CR 4.40, RMSE 0.46 counts) already doubles compression
-   over the best lossless with imperceptible distortion** — RMSE < 0.5 counts
-   on int16 data (dynamic range 65 536) is < 0.001 % of range.
+2. **T.261 QP=1.5 (CR 4.40, RMSE 0.46 counts, PRDN ≈ 2.3 % of signal RMS)
+   already doubles compression over the best general-purpose lossless.**
+   NOTE: the earlier "< 0.001 % of int16 range" framing was wrong — the
+   int16 range is the container, not the signal. Actual signal std on
+   this recording ≈ 20 counts (raw); RMSE / signal-std → PRDN ≈ 2.3 %.
+   Whether this preserves spike waveforms enough for downstream sorting
+   requires Kilosort-agreement + waveform-features eval (Phase 3 metrics
+   in the plan).
 
-3. **T.261 QP=8 hits CR 16.8** — 7 × better than the best lossless, at
-   RMSE 2.4 counts. Downstream spike-sorting-fidelity evaluation (Kilosort
-   against ground truth) is still needed to confirm acceptability.
+3. **T.261 QP=8 hits CR 16.8** — 7 × better than the best general-purpose
+   lossless, at RMSE 2.4 counts / PRDN ≈ 12 % of signal RMS. Likely
+   severe degradation of small-amplitude spikes; downstream
+   spike-sorting-fidelity evaluation required before use.
 
 4. **T.261 encode is 50 × slower than real-time** across every QP config on
    this subprocess-wrapper stopgap. Phase 2b's pybind11 in-process wrapper

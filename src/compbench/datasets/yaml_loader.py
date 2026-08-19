@@ -34,6 +34,17 @@ def load_yaml(path: str | Path, **overrides: Any) -> LoadedDataset:
         raise FileNotFoundError(f"YAML dataset config not found: {p}")
     with p.open() as f:
         cfg = yaml.safe_load(f) or {}
+    # Reject unknown top-level keys — silent typos ("preproccessing:" instead
+    # of "preprocessing:") would otherwise ship as legitimate cells with the
+    # wrong data and be very hard to debug at 336-cell scale.
+    _allowed_keys = {"loader", "params", "preprocessing"}
+    unknown = set(cfg) - _allowed_keys
+    if unknown:
+        raise ValueError(
+            f"YAML {p}: unknown top-level key(s) {sorted(unknown)}. "
+            f"Allowed: {sorted(_allowed_keys)}. "
+            f"If you meant one of these, check for typos."
+        )
     scheme = cfg.get("loader")
     if not scheme:
         raise ValueError(f"YAML {p} missing required `loader:` key")

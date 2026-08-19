@@ -16,7 +16,12 @@ def compression_ratio(original_bytes: int, encoded_bytes: int) -> float:
 
 
 def rmse(original: np.ndarray, reconstructed: np.ndarray) -> float:
-    """Root-mean-square error in the units of the input."""
+    """Root-mean-square error in the units of the input.
+
+    Note: this is the *full-band* RMSE. For spike-band ephys distortion
+    (Buccino et al. Fig 4-6 methodology), use `rmse_band_limited()` which
+    filters the reconstruction error before computing.
+    """
     if original.shape != reconstructed.shape:
         raise ValueError(
             f"Shape mismatch: original {original.shape} vs reconstructed {reconstructed.shape}"
@@ -26,6 +31,43 @@ def rmse(original: np.ndarray, reconstructed: np.ndarray) -> float:
         reconstructed = reconstructed.astype(original.dtype)
     diff = original.astype(np.float64) - reconstructed.astype(np.float64)
     return float(np.sqrt(np.mean(diff * diff)))
+
+
+def rmse_band_limited(
+    original: np.ndarray,
+    reconstructed: np.ndarray,
+    sample_rate_hz: float,
+    low_hz: float = 300.0,
+    high_hz: float = 6000.0,
+    order: int = 4,
+) -> float:
+    """RMSE of the band-limited reconstruction error.
+
+    Buccino et al. 2023 methodology: compute (original - reconstructed),
+    filter the error signal through a 300-6000 Hz band-pass, then RMSE.
+    This isolates the codec's distortion in the spike band, independent of
+    whether the codec was applied to raw or already-filtered data.
+
+    Requires scipy. Filters per-channel (axis=0) via zero-phase
+    Butterworth. On the paper's Fig 4-6 y-axis this is the "RMSE".
+    """
+    from scipy.signal import butter, filtfilt
+
+    if original.shape != reconstructed.shape:
+        raise ValueError(
+            f"Shape mismatch: original {original.shape} vs reconstructed {reconstructed.shape}"
+        )
+    nyq = 0.5 * float(sample_rate_hz)
+    if not 0 < low_hz < high_hz < nyq:
+        raise ValueError(
+            f"bandpass requires 0 < low ({low_hz}) < high ({high_hz}) < Nyquist ({nyq})"
+        )
+    b, a = butter(int(order), [low_hz / nyq, high_hz / nyq], btype="band")
+    err = original.astype(np.float64) - reconstructed.astype(np.float64)
+    if err.ndim == 1:
+        err = err[:, None]
+    filtered = filtfilt(b, a, err, axis=0)
+    return float(np.sqrt(np.mean(filtered * filtered)))
 
 
 def round_trip_ok(original: np.ndarray, reconstructed: np.ndarray) -> bool:
@@ -124,5 +166,6 @@ __all__ = [
     "prdn",
     "random_access_latency",
     "rmse",
+    "rmse_band_limited",
     "round_trip_ok",
 ]

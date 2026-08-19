@@ -82,13 +82,19 @@ paper:
 	snakemake -s src/compbench/pipeline/Snakefile \
 	    --configfile "$$PROFILE" \
 	    --cores $${CORES:-4} \
+	    --keep-going \
 	    $${SNAKEMAKE_ARGS:-}
+
+# --keep-going: at 336-cell scale, one bad cell (T.261 timeout, OOM, …) should
+# not block the report on the remaining 335. The aggregator is already
+# tolerant of missing cells (rglob("metrics.json")).
 
 full:
 	@[ -f "$${PROFILE:-}" ] || (echo "usage: make full PROFILE=configs/profiles/full.yaml" && exit 1)
 	snakemake -s src/compbench/pipeline/Snakefile \
 	    --configfile "$$PROFILE" \
 	    --cores $${CORES:-8} \
+	    --keep-going \
 	    $${SNAKEMAKE_ARGS:-}
 
 .PHONY: containers containers-apptainer

@@ -4,7 +4,7 @@ for the general-purpose compressors evaluated in Buccino et al. Fig 2.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from numcodecs import LZ4, LZMA, GZip, Zlib, Zstd
 from numcodecs.abc import Codec
@@ -20,8 +20,8 @@ class GZipAdapter(CodecAdapter):
     name: ClassVar[str] = "gzip"
     lossy: ClassVar[bool] = False
 
-    def __init__(self, level: int | str = 5, **kw: Any) -> None:
-        super().__init__(level=int(level), **kw)
+    def __init__(self, level: int | str = 5) -> None:
+        super().__init__(level=int(level))
         self._level = int(level)
 
     def make_codec(self) -> Codec:
@@ -35,8 +35,8 @@ class ZlibAdapter(CodecAdapter):
     name: ClassVar[str] = "zlib"
     lossy: ClassVar[bool] = False
 
-    def __init__(self, level: int | str = 5, **kw: Any) -> None:
-        super().__init__(level=int(level), **kw)
+    def __init__(self, level: int | str = 5) -> None:
+        super().__init__(level=int(level))
         self._level = int(level)
 
     def make_codec(self) -> Codec:
@@ -50,8 +50,8 @@ class LZ4Adapter(CodecAdapter):
     name: ClassVar[str] = "lz4"
     lossy: ClassVar[bool] = False
 
-    def __init__(self, acceleration: int | str = 1, **kw: Any) -> None:
-        super().__init__(acceleration=int(acceleration), **kw)
+    def __init__(self, acceleration: int | str = 1) -> None:
+        super().__init__(acceleration=int(acceleration))
         self._acceleration = int(acceleration)
 
     def make_codec(self) -> Codec:
@@ -65,8 +65,8 @@ class ZstdAdapter(CodecAdapter):
     name: ClassVar[str] = "zstd"
     lossy: ClassVar[bool] = False
 
-    def __init__(self, level: int | str = 3, **kw: Any) -> None:
-        super().__init__(level=int(level), **kw)
+    def __init__(self, level: int | str = 3) -> None:
+        super().__init__(level=int(level))
         self._level = int(level)
 
     def make_codec(self) -> Codec:
@@ -80,8 +80,8 @@ class LZMAAdapter(CodecAdapter):
     name: ClassVar[str] = "lzma"
     lossy: ClassVar[bool] = False
 
-    def __init__(self, preset: int | str = 6, **kw: Any) -> None:
-        super().__init__(preset=int(preset), **kw)
+    def __init__(self, preset: int | str = 6) -> None:
+        super().__init__(preset=int(preset))
         self._preset = int(preset)
 
     def make_codec(self) -> Codec:

@@ -11,7 +11,7 @@
 
 Buccino et al. 2023 (J Neural Eng, [10.1088/1741-2552/acf5a4](https://doi.org/10.1088/1741-2552/acf5a4)) established a benchmarking methodology for lossless and near-lossless compression of extracellular electrophysiology data, evaluating ~11 general-purpose and audio codecs on Neuropixels recordings. Their finding — WavPack (lossless) and WavPack-Hybrid (near-lossless) preserve spike-sorting fidelity at ~7× compression — is now the de-facto reference for the DANDI / SpikeInterface ecosystem.
 
-In parallel, **ITU-T T.261** (a.k.a. H.BWC, twin-published as **ISO/IEC 23003-8 / MPEG-D Part 8**) was approved in **July 2024** as the first *standards-track* codec purpose-built for biomedical waveforms (EEG, ECG, EMG, and generic multichannel time-series at 500 Hz – 40 kHz, 16–24 bpp). **DICOM WG-32** work item **2022-09-A** is defining transfer syntaxes for it. The community currently has **no independent benchmark** comparing T.261 against the codecs Buccino et al. tested.
+In parallel, **ITU-T T.261** (a.k.a. H.BWC, twin-published as **ISO/IEC 23003-8 / MPEG-D Part 8**) was approved in **July 2026** as the first *standards-track* codec purpose-built for biomedical waveforms (EEG, ECG, EMG, and generic multichannel time-series at 500 Hz – 40 kHz, 16–24 bpp). **DICOM WG-32** work item **2022-09-A** is defining transfer syntaxes for it. The community currently has **no independent benchmark** comparing T.261 against the codecs Buccino et al. tested.
 
 **This plan proposes a turnkey (single-command) framework that:**
 
@@ -49,7 +49,7 @@ The deliverable is **not** a paper; it is infrastructure + a reference report. A
 | Facet                       | Value                                                                                                                                                                                                                                                                                                       |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Names                       | ITU-T Recommendation **T.261** (informally *H.BWC* — "Biomedical Waveform Coding"); ISO/IEC 23003-8; MPEG-D Part 8                                                                                                                                                                                          |
-| Approved                    | July 2024                                                                                                                                                                                                                                                                                                   |
+| Approved                    | July 2026                                                                                                                                                                                                                                                                                                   |
 | Study group                 | ITU-T SG21 Q6 (formerly VCEG); joint with ISO/IEC JTC1/SC29/WG6 (MPEG Audio)                                                                                                                                                                                                                                |
 | Primary editor              | ETRI (Electronics and Telecommunications Research Institute, Korea)                                                                                                                                                                                                                                         |
 | Scope                       | Interoperable, flexible, lossy / near-lossless / lossless coding of biomedical & general multichannel waveforms                                                                                                                                                                                             |
@@ -58,7 +58,7 @@ The deliverable is **not** a paper; it is infrastructure + a reference report. A
 | Features                    | Multi-channel, mixed sample rates, independent & joint channel coding, blocking + indexing for selective random access                                                                                                                                                                                      |
 | DICOM adoption              | WG-32 work item **2022-09-A** — new transfer syntaxes defined in DICOM Sup 253                                                                                                                                                                                                                              |
 | Reference software           | **Publicly cloneable** at [`https://vcgit.hhi.fraunhofer.de/vceg-sw/bwc`](https://vcgit.hhi.fraunhofer.de/vceg-sw/bwc) under the **Clear BSD** license. Created 2025-01-09, 191 commits, 7 tagged releases as of 2026-08. Same Fraunhofer HHI GitLab that hosts JVET's VTM/HM/JM. No ITU membership required. |
-| Specification PDF            | **Not yet in the public ITU-T database** as of 2026-08-18 — `https://www.itu.int/rec/T-REC-T.261` returns nothing. Publication lag from July 2024 approval is normal for ITU-T; expect it to appear over time. Not on the critical path — the reference software is our primary source. |
+| Specification PDF            | **Not yet in the public ITU-T database** as of 2026-08-18 — `https://www.itu.int/rec/T-REC-T.261` returns nothing. Publication lag from July 2026 approval is normal for ITU-T; expect it to appear over time. Not on the critical path — the reference software is our primary source. |
 
 **Implication for our benchmark:** vendoring is straightforward. Pin `vceg-sw/bwc` as a git submodule (or a fetched tag inside `pyproject.toml`'s build backend) and produce a normal `manylinux` wheel of `t261-numcodecs` that can go to PyPI. The ITU-T specification PDF itself is a separate concern (publication lag; requires an ITU account for free download, membership for TIES-gated drafts), but the *code* is unencumbered.
 
@@ -402,6 +402,43 @@ Concrete steps:
 - Deliver the first public report: "T.261 in the context of Buccino et al. 2023."
 
 **Verify:** T.261 sits on or beats WavPack on lossless CR (its design claim); document any surprises. Reader can compare T.261 directly against the paper's figures without any dataset caveats.
+
+### Phase 3.5 — Scale-out fixes (from 5-reviewer synthesis 2026-08-19)
+
+Independent reviewer sweep flagged specific blockers between "1-recording
+smoke works" and "16-recording paper reproduction works". Track here so
+they don't get lost:
+
+- **[R5-C1] Band-pass preprocessing OOMs at 1200 s.** `filtfilt` on 27 GB int16
+  promotes to 110 GB float64 + internal buffers → ~200-250 GB peak per cell.
+  Fix: chunk along channels (independent per channel per current docstring),
+  or use `sosfiltfilt` on float32, or move to SpikeInterface's lazy
+  `bandpass_filter` and materialize in chunks via `get_traces(start_frame=…)`.
+- **[R5-C2] T.261 joint-channel EEG lossless unbounded.** >30 min at 10 s;
+  extrapolates to 60+ h at 1200 s. Fix (any of): chunk by channel-group (8×
+  48-channel subproblems), drop from `paper-real.yaml` until Phase 2b lands,
+  or dedicate an 8 h `resources.time_min` slot per cell.
+- **[R5-H1] Profile YAML doesn't scale to 16 × 3 datasets.** Currently one
+  YAML per dataset variant; 48 hand-written YAMLs isn't workable. Fix:
+  extend `expand_matrix` with `datasets_matrix:` block that cross-products
+  `template × recording_id × preprocessing`.
+- **[R5-H2] Memory-bound parallelism.** Runner holds original + encoded +
+  decoded simultaneously during round-trip check. At 1200 s that's ~24 GB ×
+  3 = 72 GB per cell. Fix: release input buffer before decode; add a
+  `--skip-roundtrip` flag for the wide sweep.
+- **[R4-H1] Preprocessing lives outside `datasets.load()`.** Only the YAML
+  loader invokes it; direct `aind-benchmark:` URI-scheme use bypasses.
+  Fix: move preprocessing invocation into `datasets.load()` OR make it a
+  distinct pipeline stage (`compbench preprocess`).
+- **[R4-M5] `LoadedDataset` not frozen; in-place mutation in yaml_loader.**
+  Use `dataclasses.replace` for post-load transformations.
+- **[R1-H3] No sorting-fidelity / waveform-features metrics.** Every
+  "acceptable distortion" claim on lossy T.261 needs these before use.
+  Kilosort agreement (against paper's Kilosort 2.5 baseline) + waveform
+  peak-to-valley/FWHM/peak-to-trough (paper's Fig 5-6). Belongs in Phase 3
+  metric expansion.
+- **[R1-M4, R5-M4] Chunk-size sweep missing.** Paper Fig 2/7 averages across
+  chunk sizes 0.1/1/10 s + shuffle variants. Add to profile matrix.
 
 ### Phase 4 — Dataset extension (scheduled after Phase 3 report ships)
 
