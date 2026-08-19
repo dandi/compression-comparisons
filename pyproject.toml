@@ -29,6 +29,7 @@ dependencies = [
     "pyyaml>=6.0",
     "con-duct>=0.7",
     "pyarrow>=15",
+    "scipy>=1.11",   # bandpass preprocessing (see compbench.preprocessing)
 ]
 
 [project.optional-dependencies]

@@ -14,7 +14,7 @@ from typing import Any
 import click
 
 from compbench import __version__, codecs
-from compbench.report import aggregate_directory, write_parquet
+from compbench.report import aggregate_directory, render_from_parquet, write_parquet
 from compbench.runner import run_cell
 
 
@@ -148,6 +148,45 @@ def report(results_dir: str, output: str) -> None:
     else:
         raise click.ClickException(f"Unsupported --output extension: {out.suffix!r}")
     click.echo(f"wrote {len(rows)} row(s) to {out}")
+
+
+@main.command("render-report")
+@click.option(
+    "--parquet",
+    "parquet_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the report.parquet produced by `compbench report`.",
+)
+@click.option(
+    "--output",
+    "output_path",
+    required=True,
+    type=click.Path(dir_okay=False),
+    help="Where to write the Markdown report (typically RESULTS.md).",
+)
+@click.option(
+    "--title",
+    default="Compression benchmark results",
+    help="Document H1 title.",
+)
+@click.option(
+    "--source-note",
+    default="",
+    help="Optional paragraph to insert after the summary line (dataset provenance, etc.).",
+)
+def render_report(parquet_path: str, output_path: str, title: str, source_note: str) -> None:
+    """Regenerate a Markdown results table from a report.parquet.
+
+    Idempotent — rerun after new cells land and the table updates.
+    """
+    render_from_parquet(
+        Path(parquet_path),
+        Path(output_path),
+        title=title,
+        source_note=source_note,
+    )
+    click.echo(f"wrote {output_path}")
 
 
 if __name__ == "__main__":

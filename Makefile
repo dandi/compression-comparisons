@@ -65,6 +65,11 @@ smoke:
 # Note: `make smoke` requires `duct` (in `[devel]` extra) and `compbench` on PATH.
 # Uses `synthetic:` dataset — no external files.
 
+.PHONY: render-report
+render-report:
+	@[ -f "$${PARQUET:-}" ] || (echo 'usage: make render-report PARQUET=results/.../report.parquet OUT=RESULTS.md' && exit 1)
+	compbench render-report --parquet "$$PARQUET" --output "$${OUT:-AUTO_TABLE.md}" $${TITLE:+--title "$$TITLE"}
+
 .PHONY: paper full snakemake-smoke
 snakemake-smoke:
 	snakemake -s src/compbench/pipeline/Snakefile \

@@ -16,5 +16,13 @@ from compbench.report.aggregate import (
     load_duct_info,
     write_parquet,
 )
+from compbench.report.render import render_from_parquet, render_markdown
 
-__all__ = ["aggregate_directory", "load_cell", "load_duct_info", "write_parquet"]
+__all__ = [
+    "aggregate_directory",
+    "load_cell",
+    "load_duct_info",
+    "render_from_parquet",
+    "render_markdown",
+    "write_parquet",
+]

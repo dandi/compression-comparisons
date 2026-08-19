@@ -1,0 +1,15 @@
+# Paper-matching variant of the CSHZAD026 slice: 10 s + Buccino et al.'s
+# 300-6000 Hz band-pass preprocessing. Matches the paper's Fig 2 setup as
+# closely as we can. Use this as the paper-reproduction default; use
+# `aind-ibl-np1-CSHZAD026-slice10s.yaml` (no preprocessing) for the raw
+# baseline.
+loader: aind-benchmark
+params:
+  path: results/scratch-real-ephys-CSHZAD026-partial
+  start_s: 0.0
+  duration_s: 10.0
+preprocessing:
+  - kind: bandpass
+    low_hz: 300
+    high_hz: 6000
+    order: 4

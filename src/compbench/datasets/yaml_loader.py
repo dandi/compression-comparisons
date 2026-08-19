@@ -2,12 +2,17 @@
 
 Config schema::
 
-    loader: synthetic                # scheme
+    loader: synthetic                # scheme (routes to a registered loader)
     params:                          # forwarded to the loader
         duration_s: 5.0
         sample_rate_hz: 1000
         n_channels: 4
         seed: 42
+    preprocessing:                   # optional, applied after load
+        - kind: bandpass
+          low_hz: 300
+          high_hz: 6000
+          order: 4
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ from typing import Any
 
 import yaml
 
+from compbench import preprocessing as _pre
 from compbench.datasets import register
 from compbench.datasets.base import LoadedDataset
 
@@ -38,4 +44,14 @@ def load_yaml(path: str | Path, **overrides: Any) -> LoadedDataset:
 
     ds = _load(f"{scheme}:", **params)
     ds.provenance.setdefault("yaml_source", str(p))
+
+    steps = cfg.get("preprocessing")
+    if steps:
+        ds.data = _pre.apply(ds.data, ds.sample_rate_hz, steps)
+        # Re-enforce C-contiguity invariant after any preprocessor.
+        import numpy as np
+
+        if not ds.data.flags["C_CONTIGUOUS"]:
+            ds.data = np.ascontiguousarray(ds.data)
+        ds.provenance["preprocessing"] = list(steps)
     return ds

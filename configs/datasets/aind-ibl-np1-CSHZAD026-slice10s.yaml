@@ -7,6 +7,10 @@
 # to the STAMPED sourcedata subdataset when the full recording is fetched.
 loader: aind-benchmark
 params:
-  path: /tmp/real-ephys/CSHZAD026_partial
+  # Path resolves relative to the compression-comparisons repo root — the
+  # partial-download snapshot lives under results/. When the full recording
+  # is fetched via `datalad get` into a STAMPED study's sourcedata subdataset,
+  # point at that path instead (see DEPLOY.md for the production layout).
+  path: results/scratch-real-ephys-CSHZAD026-partial
   start_s: 0.0
   duration_s: 10.0

@@ -11,12 +11,10 @@
 # study repo.
 loader: aind-benchmark
 params:
-  # NOTE: /tmp/real-ephys/CSHZAD026_partial is the first 120 s of the recording,
-  # copied from git-annex's partial-download tmp file (full 27.6 GB not fetched
-  # in this session). Slicing 60 s from that gives valid IBL NP1 data. When the
-  # full recording is fetched to the STAMPED sourcedata subdataset, point at
-  #   sourcedata/aind-ephys-compression/ibl-np1/CSHZAD026_2020-09-04_probe00
-  # instead — no other changes needed.
-  path: /tmp/real-ephys/CSHZAD026_partial
+  # results/scratch-real-ephys-CSHZAD026-partial holds the first 120 s of the
+  # recording (partial-download snapshot). 60 s slice → 1.38 GB/encode.
+  # Migrate to sourcedata/aind-ephys-compression/ibl-np1/... once the full
+  # recording is available in the STAMPED sourcedata subdataset.
+  path: results/scratch-real-ephys-CSHZAD026-partial
   start_s: 0.0
   duration_s: 60.0
