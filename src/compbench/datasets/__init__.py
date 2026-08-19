@@ -87,5 +87,7 @@ from compbench.datasets import yaml_loader as _yaml  # noqa: F401,E402
 # Optional loaders — require extra packages.
 with _contextlib.suppress(ImportError):
     from compbench.datasets import spikeinterface_loader as _si  # noqa: F401
+with _contextlib.suppress(ImportError):
+    from compbench.datasets import aind_benchmark as _aind  # noqa: F401
 
 __all__ = ["LoadedDataset", "load", "register", "schemes"]

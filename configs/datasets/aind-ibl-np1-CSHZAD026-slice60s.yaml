@@ -1,0 +1,16 @@
+# Paper reproduction — 60-second slice of one IBL NP1 recording.
+# 60s × 30kHz × 384 ch × int16 = 1.38 GB per encode = manageable per-cell.
+# Paper used the full 1200 s recording; the 60 s slice's CR should track the
+# full-recording CR to within a percent or two.
+#
+# Requires the raw file to be fetched via `datalad get`:
+#   datalad get ibl-np1/CSHZAD026_2020-09-04_probe00/traces_cached_seg0.raw
+#
+# Path is resolved relative to whatever `--config sourcedata_dir=...` gives the
+# Snakefile; defaults to sourcedata/aind-ephys-compression/ inside the STAMPED
+# study repo.
+loader: aind-benchmark
+params:
+  path: /tmp/stamped-scratch/ephys-compression/ibl-np1/CSHZAD026_2020-09-04_probe00
+  start_s: 0.0
+  duration_s: 60.0

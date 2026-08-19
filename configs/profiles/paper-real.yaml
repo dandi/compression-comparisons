@@ -1,0 +1,49 @@
+# Paper reproduction (real ephys data) — Buccino et al. 2023 Fig 2 & 3 codec
+# sweep on the AIND ephys-compression benchmark data, extended with T.261.
+#
+# This profile references the AIND ephys-compression bucket via the DataLad
+# mirror (`///aind-benchmark-data/ephys-compression`). Fetch data first:
+#
+#   datalad clone ///aind-benchmark-data/ephys-compression sourcedata
+#   datalad -C sourcedata get ibl-np1/CSHZAD026_2020-09-04_probe00/traces_cached_seg0.raw
+#
+# Each cell encodes a 60-second slice from CSHZAD026 (1.38 GB per encode).
+# For the full 1200 s paper-comparable numbers, edit the dataset YAML's
+# `duration_s` field or drop it entirely (then each cell needs ~27 GB RAM).
+
+name: paper-real
+datasets:
+  - configs/datasets/aind-ibl-np1-CSHZAD026-slice60s.yaml
+
+codecs:
+  # blosc family — full Fig 2 axis.
+  - {codec: blosc-lz4,   params: {level: 3, shuffle: byte}}
+  - {codec: blosc-lz4,   params: {level: 9, shuffle: byte}}
+  - {codec: blosc-lz4hc, params: {level: 3, shuffle: byte}}
+  - {codec: blosc-lz4hc, params: {level: 9, shuffle: byte}}
+  - {codec: blosc-zlib,  params: {level: 3, shuffle: byte}}
+  - {codec: blosc-zlib,  params: {level: 9, shuffle: byte}}
+  - {codec: blosc-zstd,  params: {level: 3, shuffle: byte}}
+  - {codec: blosc-zstd,  params: {level: 9, shuffle: byte}}
+
+  # Standard codecs used directly.
+  - {codec: gzip,        params: {level: 5}}
+  - {codec: zlib,        params: {level: 5}}
+  - {codec: lz4,         params: {acceleration: 1}}
+  - {codec: zstd,        params: {level: 3}}
+  - {codec: zstd,        params: {level: 22}}
+  - {codec: lzma,        params: {preset: 6}}
+
+  # T.261 / H.BWC — lossless. Ephys @ 30 kHz sits inside T.261's *research*
+  # sample-rate envelope but well above the presets' EEG/ECG target range,
+  # so raw CR may not track the audio-codec configs. Reported as-is.
+  - {codec: t261,        params: {preset: combinedPresetEEG_IndepChannel_lossless}}
+  - {codec: t261,        params: {preset: combinedPresetEEG_lossless}}
+
+  # T.261 / H.BWC — lossy QP sweep. This is the WavPack-Hybrid `bps` analogue
+  # the paper drove for its lossy Pareto plot.
+  - {codec: t261,        params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 1.5}}
+  - {codec: t261,        params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 2.0}}
+  - {codec: t261,        params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 3.0}}
+  - {codec: t261,        params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 5.0}}
+  - {codec: t261,        params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 8.0}}
