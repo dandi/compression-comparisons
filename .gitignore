@@ -39,3 +39,4 @@ results/
 
 # Datalad — the datalad handler manages this itself, but noted here for clarity
 # (do NOT gitignore .datalad — it holds dataset metadata)
+.claude/
