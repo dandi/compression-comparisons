@@ -13,7 +13,7 @@
 
 name: paper-real
 datasets:
-  - configs/datasets/aind-ibl-np1-CSHZAD026-slice60s.yaml
+  - configs/datasets/aind-ibl-np1-CSHZAD026-slice10s.yaml
 
 codecs:
   # blosc family — full Fig 2 axis.

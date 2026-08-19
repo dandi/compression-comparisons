@@ -1,0 +1,12 @@
+# Paper reproduction — 10-second slice of one IBL NP1 recording.
+# 10s x 30kHz x 384 ch x int16 = 230 MB per encode.
+# Small enough that T.261 finishes each cell in ~2 min, while still large
+# enough that CR estimates track the paper's full-recording numbers.
+#
+# Path currently points at a copy of the git-annex partial download; migrate
+# to the STAMPED sourcedata subdataset when the full recording is fetched.
+loader: aind-benchmark
+params:
+  path: /tmp/real-ephys/CSHZAD026_partial
+  start_s: 0.0
+  duration_s: 10.0

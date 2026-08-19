@@ -220,7 +220,7 @@ class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
                 "--FileFormat=RawH2",
                 *self._build_overrides(),
             ]
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
             if proc.returncode != 0:
                 raise RuntimeError(f"BWC EncoderApp failed (rc={proc.returncode}):\n{proc.stderr}")
             return bs_path.read_bytes()
@@ -238,7 +238,7 @@ class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
                 f"--OutputFile={out_path}",
                 "--FileFormat=RawH2",
             ]
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
             if proc.returncode != 0:
                 raise RuntimeError(f"BWC DecoderApp failed (rc={proc.returncode}):\n{proc.stderr}")
             arr = _read_rawh2(out_path)
