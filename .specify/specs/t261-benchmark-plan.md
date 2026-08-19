@@ -352,7 +352,23 @@ Ordered by increasing scope; each phase is independently useful and PR-sized.
 - Sorter-in-the-loop cells (lossy sweep) run in `compbench-ks25` per `configs/profiles/paper.yaml` — this matches the paper's Kilosort 2.5 exactly.
 - Reproduce **Figure 2 & Figure 3** of the paper on at least one Buccino et al. dataset (IBL NP1 recording, plus one AIND NP1 for sanity) to validate the framework.
 
-**Verify:** CR and ×RT numbers match paper within ± 5%. Peak-RSS numbers from con-duct rank codecs plausibly (e.g. `lzma` > `blosc-zstd`).
+**Verify (revised 2026-08-19):** the paper's Fig 2 / Fig 7 report **distributions** over 8 NP1 recordings × up to 9 shuffle+level configs (N = 48-72 per codec). A single-recording × single-config point from our sweep is one point in that distribution and will not necessarily hit the paper's mean. The revised gate is:
+
+1. **Ranking match:** our sweep reproduces the paper's codec ordering
+   (lzma > zstd L22 > blosc-zstd L9 > blosc-zlib > gzip ≈ zlib > blosc-lz4hc >
+   blosc-lz4 > lz4) on any single recording. **Necessary but not sufficient.**
+2. **Median-of-8 match:** run our sweep on the same 8 NP1 recordings; take the
+   per-codec median across recordings + configs; compare against the paper's
+   published mean-of-8. Target: **within ± 5% of the paper's mean, or within
+   the paper's reported SD** (whichever is looser). Both raw (matches Fig 2)
+   and band-pass (matches Fig 7) should be reported side-by-side.
+3. **con-duct sanity:** peak-RSS ranks codecs plausibly (`lzma` > `blosc-zstd` etc).
+
+Paper's per-recording CSVs live in the Code Ocean capsule
+`AllenNeuralDynamics/aind-capsule-ephys-compression-results` (data asset,
+account required) — fetch them once, drop the per-recording numbers into
+`.specify/specs/paper-cited-numbers.yaml`, and let the aggregator diff
+automatically.
 
 ### Phase 2 — T.261 `numcodecs` wrapper (~6 engineer-days; no external blockers)
 

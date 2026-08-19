@@ -26,22 +26,49 @@ for lossless, ~100 % for the lightly-lossy QP configs. Plausible explanation:
 T.261's DCT+prediction+CABAC pipeline was designed with band-limited
 biosignal input in mind; sub-300 Hz content wastes coding capacity.
 
-## Paper cross-check now aligns
+## Paper cross-check — corrected mapping
 
-| codec        | our CR (band-pass) | paper CR (band-pass) | ratio |
-| ------------ | -----------------: | -------------------: | ----: |
-| lzma         | 3.36               | ~2.7                 |  1.24 |
-| blosc-zstd   | 2.80               | ~2.9                 |  0.97 |
-| gzip         | 2.60               | ~2.4                 |  1.08 |
+**Earlier drafts of this note compared these band-pass numbers to Buccino
+et al. Fig 2 — that was wrong.** Fig 2 uses RAW data (no preprocessing);
+band-pass results belong against Fig 7 in the paper (their §"Preprocessing
+effects"). This note now defers absolute-magnitude cross-check until we
+have either (a) the paper's `benchmark-lossless-preprocessing.csv` (Code
+Ocean asset only), or (b) our own sweep across all 8 NP1 recordings so we
+can compare medians vs paper's reported means. The "~2.7 / ~2.9 / ~2.4"
+paper numbers in the earlier draft were my guesses, not citations.
 
-Rankings match; absolute magnitudes within ~10 %. Remaining gap is the 10 s
-vs 1 200 s slice + default vs swept `chunk_duration`.
+What we CAN say from this run:
+- **T.261 IndepChannel lossless (CR 6.90) is the highest lossless CR
+  measured here**, 105 % above lzma (3.36) and 146 % above blosc-zstd L9
+  (2.80).
+- The **rankings** of the general-purpose codecs match the paper Fig 2
+  order (which uses raw data, and the same ranking holds after band-pass):
+  lzma > zstd L22 > blosc-zstd L9 > blosc-zlib > gzip ≈ zlib > blosc-lz4hc
+  > blosc-lz4 > lz4.
+- Band-pass **helps T.261 much more than it helps general-purpose codecs**
+  (delta table below). That's the interesting per-codec-family effect and
+  it's self-contained — doesn't depend on paper cross-check.
 
 ## Headline
 
 **T.261 IndepChannel lossless (CR 6.90) beats every general-purpose lossless
 codec by 105 %.** T.261 lossy QP=1.5 (CR 8.76, RMSE 0.41) more than doubles
 compression over lzma at imperceptible distortion. T.261 QP=8 hits CR 23.5.
+
+## Caveats
+
+- Paper Fig 2 = raw data; Fig 7 = preprocessed. Cross-check my results
+  against the matching figure. Earlier drafts of this note bundled the
+  wrong pairing.
+- Paper reports means ± SD across 8 NP1 recordings × multiple shuffle/level
+  configs (N = 48-72 per bar). Our single-recording × single-config
+  numbers are single points in that distribution, not directly comparable
+  to a mean.
+- Absolute-magnitude paper cross-check requires the paper's
+  `benchmark-lossless-preprocessing.csv` (Code Ocean capsule
+  `AllenNeuralDynamics/aind-capsule-ephys-compression-results` data asset;
+  needs a CO account and manual fetch), or running our own 8-recording
+  sweep.
 
 ## Provenance
 

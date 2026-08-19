@@ -157,6 +157,7 @@ class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
         step_size_for_qp: float | None = None,
         max_abs_delta_qp: int | None = None,
         extra_args: tuple[str, ...] = (),
+        progress_dir: str | Path | None = None,
     ) -> None:
         if not _AVAILABLE:
             raise RuntimeError(
@@ -179,6 +180,7 @@ class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
         self.step_size_for_qp = float(step_size_for_qp) if step_size_for_qp is not None else None
         self.max_abs_delta_qp = int(max_abs_delta_qp) if max_abs_delta_qp is not None else None
         self.extra_args = tuple(extra_args)
+        self.progress_dir = Path(progress_dir) if progress_dir is not None else None
         self._cfg_path = cfg_path
 
     def _build_overrides(self) -> list[str]:
@@ -201,12 +203,60 @@ class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
             "extra_args": list(self.extra_args),
         }
 
+    def _run_bwc(
+        self,
+        cmd: list[str],
+        scratch_root: Path,
+        phase: str,
+    ) -> None:
+        """Run BWC binary with stdout/stderr streamed to on-disk log files.
+
+        The log files are `<scratch_root>/<phase>.stdout.log` and
+        `<phase>.stderr.log`. They exist as long as `scratch_root` exists —
+        callers pin `scratch_root` via a TemporaryDirectory (or the
+        `progress_dir=` init arg, which keeps the dir around for
+        inspection). While the process is running, a separate observer can
+        `tail -f` those files to compute an ETA — see
+        `compbench t261-progress <scratch_root>`.
+
+        On non-zero exit we read the tail of stderr into the exception
+        message so callers still get a meaningful error.
+        """
+        scratch_root.mkdir(parents=True, exist_ok=True)
+        stdout_path = scratch_root / f"{phase}.stdout.log"
+        stderr_path = scratch_root / f"{phase}.stderr.log"
+        with stdout_path.open("wb") as f_out, stderr_path.open("wb") as f_err:
+            proc = subprocess.Popen(cmd, stdout=f_out, stderr=f_err)
+            try:
+                proc.wait(timeout=1800)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+                raise
+        if proc.returncode != 0:
+            tail = stderr_path.read_text(errors="replace")[-2000:]
+            raise RuntimeError(f"BWC {phase} failed (rc={proc.returncode}):\n{tail}")
+
+    def _make_scratch(self, kind: str) -> tuple[Path, tempfile.TemporaryDirectory[str] | None]:
+        """Return (path, tempdir_handle-or-None). If `progress_dir` was set,
+        the scratch lives there (persistent, inspectable); otherwise a
+        TemporaryDirectory that must be kept alive by the caller.
+        """
+        if self.progress_dir is not None:
+            # Persistent, unique-per-call subdir. `mkdtemp` gives us the
+            # collision-free naming without touching tempfile internals.
+            self.progress_dir.mkdir(parents=True, exist_ok=True)
+            path = Path(tempfile.mkdtemp(prefix=f"{kind}-", dir=self.progress_dir))
+            return path, None
+        td = tempfile.TemporaryDirectory(prefix=f"t261-{kind}-")
+        return Path(td.name), td
+
     def encode(self, buf: Any) -> bytes:
         data = np.asarray(buf)
-        with tempfile.TemporaryDirectory(prefix="t261-enc-") as td:
-            tmp = Path(td)
-            in_path = tmp / "input.raw"
-            bs_path = tmp / "output.bwc"
+        scratch, td = self._make_scratch("enc")
+        try:
+            in_path = scratch / "input.raw"
+            bs_path = scratch / "output.bwc"
             _write_rawh2(in_path, data)
             _, n_channels = data.shape
             cmd = [
@@ -220,17 +270,18 @@ class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
                 "--FileFormat=RawH2",
                 *self._build_overrides(),
             ]
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-            if proc.returncode != 0:
-                raise RuntimeError(f"BWC EncoderApp failed (rc={proc.returncode}):\n{proc.stderr}")
+            self._run_bwc(cmd, scratch, phase="encode")
             return bs_path.read_bytes()
+        finally:
+            if td is not None:
+                td.cleanup()
 
     def decode(self, buf: Any, out: np.ndarray | None = None) -> np.ndarray:
         data_bytes = bytes(buf)
-        with tempfile.TemporaryDirectory(prefix="t261-dec-") as td:
-            tmp = Path(td)
-            bs_path = tmp / "input.bwc"
-            out_path = tmp / "output.raw"
+        scratch, td = self._make_scratch("dec")
+        try:
+            bs_path = scratch / "input.bwc"
+            out_path = scratch / "output.raw"
             bs_path.write_bytes(data_bytes)
             cmd = [
                 str(DECODER),
@@ -238,10 +289,11 @@ class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
                 f"--OutputFile={out_path}",
                 "--FileFormat=RawH2",
             ]
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-            if proc.returncode != 0:
-                raise RuntimeError(f"BWC DecoderApp failed (rc={proc.returncode}):\n{proc.stderr}")
+            self._run_bwc(cmd, scratch, phase="decode")
             arr = _read_rawh2(out_path)
+        finally:
+            if td is not None:
+                td.cleanup()
         if out is not None:
             out[...] = arr
             return out

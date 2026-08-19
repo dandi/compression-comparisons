@@ -150,6 +150,69 @@ def report(results_dir: str, output: str) -> None:
     click.echo(f"wrote {len(rows)} row(s) to {out}")
 
 
+@main.command("t261-progress")
+@click.option(
+    "--log",
+    "log_path",
+    required=False,
+    type=click.Path(dir_okay=False),
+    help="Encoder stdout log path (e.g. <scratch>/enc-*/encode.stdout.log).",
+)
+@click.option(
+    "--scratch",
+    "scratch_root",
+    required=False,
+    type=click.Path(exists=True, file_okay=False),
+    help="Alternative to --log: root of a `progress_dir` scratch tree; picks newest enc-*.",
+)
+@click.option(
+    "--watch",
+    "watch_mode",
+    is_flag=True,
+    help="Poll the log periodically until the process exits.",
+)
+@click.option(
+    "--interval",
+    "interval_s",
+    default=5.0,
+    help="Watch interval seconds (default 5).",
+)
+@click.option(
+    "--expected-segments",
+    "expected_segments",
+    type=int,
+    default=None,
+    help="Total segments this encode is expected to emit — derived from a completed reference run. Enables ETA.",
+)
+def t261_progress(
+    log_path: str | None,
+    scratch_root: str | None,
+    watch_mode: bool,
+    interval_s: float,
+    expected_segments: int | None,
+) -> None:
+    """Parse T.261 encoder progress logs to estimate ETA."""
+    from compbench.t261_progress import find_active_encode_scratch, parse_log, watch
+
+    if log_path is None:
+        if scratch_root is None:
+            raise click.UsageError("pass --log <path> or --scratch <root>")
+        found = find_active_encode_scratch(scratch_root)
+        if found is None:
+            raise click.ClickException(f"no enc-*/encode.stdout.log under {scratch_root}")
+        log_path = str(found)
+    if watch_mode:
+        watch(log_path, interval_s=interval_s, expected_total_segments=expected_segments)
+        return
+    p = Path(log_path)
+    start = p.stat().st_mtime if p.exists() else None
+    # Best-effort start-time inference: mtime of the first line's write.
+    # In practice, the caller should pass through the codec's `progress_dir`
+    # timestamp; for a one-shot query we approximate with the file mtime.
+    snap = parse_log(log_path, start_epoch=start, expected_total_segments=expected_segments)
+    click.echo(snap.human_line())
+
+
 @main.command("render-report")
 @click.option(
     "--parquet",

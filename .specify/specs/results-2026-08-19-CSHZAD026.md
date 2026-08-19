@@ -50,18 +50,40 @@ is beyond what the subprocess stopgap can bound cheaply).
 
 ## Comparison with Buccino et al. 2023 Fig 2
 
-Our numbers are ~20-30 % lower than the paper's reported CRs because we
-skip the paper's 300–6000 Hz band-pass preprocessing. The **ranking** of
-the lossless codecs matches the paper. On absolute magnitudes:
+Both our raw sweep and the paper's Fig 2 use raw (no-preprocessing) data,
+so this is the correct figure to compare against — see §"Caveats" for a
+correction to an earlier version of this note that mistakenly mapped
+band-pass results against Fig 2.
 
-| codec        | ours (raw) | paper (band-pass) | ratio |
-| ------------ | ---------- | ----------------- | ----- |
-| lzma         | 2.61       | ~2.7              | 0.97  |
-| blosc-zstd   | 2.32       | ~2.9              | 0.80  |
-| gzip         | 1.94       | ~2.4              | 0.81  |
+The paper's Fig 2 reports **distributions** over 8 NP1 recordings × up
+to 9 codec configs (N = 48-72 jobs per codec class). Our sweep here is
+**one recording (CSHZAD026) × one config per codec** — one point per bar
+in the paper's violin plots. Rankings should match; absolute magnitudes
+will land inside the paper's distribution but not necessarily at the
+mean.
+
+Rankings we can validate: lzma > zstd L22 ≈ blosc-zstd L9 > blosc-zlib >
+gzip ≈ zlib > blosc-lz4hc > blosc-lz4 > lz4 — matches paper Fig 2 order.
+
+Absolute-magnitude comparison requires either (a) the paper's
+`benchmark-lossless.csv` (available only via the Code Ocean capsule
+`AllenNeuralDynamics/aind-capsule-ephys-compression-results`, needs a CO
+account), or (b) our own sweep across all 8 NP1 recordings, taking the
+median vs. paper's reported mean. Both are follow-ups.
 
 Adding band-pass preprocessing is a small follow-up — codec-preprocessing
 coupling belongs in `configs/datasets/*.yaml` alongside the loader params.
+
+## Caveats
+
+- The paper's Fig 2 (raw) N-per-bar aggregation includes 8 NP1 recordings
+  × varying shuffle/level. Our single-cell numbers here are single points
+  in that distribution, not the distribution's mean. See `.specify/specs/t261-benchmark-plan.md` §Phase 3 for how the plan's go/no-go
+  gate was revised from "match paper Fig 2 within ±5%" to
+  "median-of-8 within ±5% of paper mean-of-8".
+- Any earlier version of this note that compared paper Fig 2 numbers to
+  band-pass results was wrong: Fig 2 is raw. Band-pass numbers should
+  compare against paper Fig 7 (see `results-2026-08-19-CSHZAD026-bandpass.md`).
 
 ## Provenance
 
