@@ -38,5 +38,5 @@ def test_mearec_metric_skeleton_stubs_raise() -> None:
         sorting.qc_pass_fraction,
         sorting.waveform_feature_errors,
     ):
-        with pytest.raises(NotImplementedError, match="Phase 3.5"):
+        with pytest.raises(NotImplementedError, match=r"Phase 3\.5"):
             fn(None, None)  # type: ignore[arg-type]

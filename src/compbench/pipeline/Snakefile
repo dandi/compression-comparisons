@@ -33,7 +33,7 @@ else:
     _profile = load_profile(dict(config))
 
 RESULTS_DIR = Path(config.get("results_dir", f"results/{_profile.name}"))
-CELLS = list(expand_matrix(_profile))
+CELLS = list(expand_matrix(_profile, generated_dir=RESULTS_DIR / "generated-datasets"))
 CELL_BY_ID = {c.cell_id: c for c in CELLS}
 
 # Early validation — fail up front with a readable message if any cell asks
