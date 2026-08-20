@@ -303,20 +303,58 @@ The Makefile just resolves those variables and invokes `snakemake --cores N --us
 
 ### 4.5 Metric set (superset of Buccino et al.)
 
-Correctness metrics live in `compbench` (`metrics.json`). Cost/throughput metrics come from con-duct (`duct-*.jsonl`) and are joined at report-aggregation time.
+Correctness metrics live in `compbench` (`metrics.json`). Cost/throughput metrics come from con-duct (`duct-*.jsonl`) and are joined at report-aggregation time. Sorting-fidelity metrics live in `compbench.metrics.sorting`; the sorting-eval pipeline (§4.7) writes them into per-cell `sorting.json`.
 
-| Metric                | Source        | Applies to              | Notes                                                                              |
-| --------------------- | ------------- | ----------------------- | ---------------------------------------------------------------------------------- |
-| CR                    | compbench     | all                     | bytes_original / bytes_compressed                                                  |
-| Encode / decode ×RT   | con-duct + manifest | all               | `recording_duration / duct.wall_time`; comparable across native-threaded codecs   |
-| Peak RSS, mean CPU %  | con-duct      | all                     | resource envelope per phase; catches native-code hotspots the Python-side misses  |
-| RMSE (raw)            | compbench     | lossy                   | full-band                                                                          |
-| RMSE (band-filtered)  | compbench     | ephys lossy             | 300 – 6 000 Hz — Buccino et al.'s definition                                       |
-| PRD, PRDN             | compbench     | ECG lossy               | standard clinical distortion metrics; required for T.261 ECG conformance           |
-| Waveform features     | compbench     | ephys lossy             | peak-to-valley, FWHM, peak-to-trough — Buccino et al.'s definitions                |
-| Spike-sorting eval    | compbench     | ephys lossy             | Kilosort 4 (was 2.5 in paper — upgrade); accuracy/precision/recall vs GT or vs raw |
-| Random-access p50/p99 | compbench     | all (esp. T.261 & Zarr) | Latency of `arr[t0:t1, :]` for random chunks — new; leverages T.261's block index  |
-| Bitstream stability   | compbench     | T.261 esp.              | Re-encode round-trip determinism; regressions on codec upgrades                    |
+| Metric                        | Source                        | Applies to              | Notes                                                                                    |
+| ----------------------------- | ----------------------------- | ----------------------- | ---------------------------------------------------------------------------------------- |
+| CR                            | compbench                     | all                     | bytes_original / bytes_compressed                                                        |
+| Encode / decode ×RT           | con-duct + manifest           | all                     | `recording_duration / duct.wall_time`; comparable across native-threaded codecs         |
+| Peak RSS, mean CPU %          | con-duct                      | all                     | resource envelope; catches native-code hotspots                                          |
+| RMSE (full-band)              | compbench                     | lossy                   | in signal units                                                                          |
+| RMSE (band-limited)           | compbench                     | ephys lossy             | 300 – 6 000 Hz on the reconstruction ERROR — paper Fig 4-6 methodology (verified 08-20)  |
+| PRD, PRDN                     | compbench                     | ECG lossy               | standard clinical distortion metrics; required for T.261 ECG conformance                 |
+| signal_std, rmse/std %        | compbench                     | lossy                   | interpret RMSE in signal units; pooled + per-channel-median                              |
+| **Sorting accuracy / precision / recall** | compbench.metrics.sorting | **simulated ephys lossy** | **Paper Fig 10** — per-GT-unit distributions; requires MEArec ground-truth loader        |
+| **Unit classification counts**| compbench.metrics.sorting     | **ephys lossy**         | **Paper Fig 11-12** — well_detected / false_positive / redundant / overmerged           |
+| **Spike-train agreement**     | compbench.metrics.sorting     | **experimental ephys**  | **Paper Fig 13** — spike-time overlap fraction vs lossless baseline; excess-spike symmetry |
+| **Waveform-feature errors**   | compbench.metrics.sorting     | **ephys lossy**         | **Paper Fig 14** — peak-to-valley, FWHM, peak-to-trough on main + peripheral (60 µm) channels |
+| **QC pass fraction**          | compbench.metrics.sorting     | **experimental ephys**  | Siegle 2021 curation (ISI viol < 0.1, presence > 0.9, amp cutoff < 0.1); Fig 12 summary   |
+| Random-access p50/p99         | compbench                     | all (esp. T.261 & Zarr) | Latency of `arr[t0:t1, :]` for random chunks — new; leverages T.261's block index        |
+| Bitstream stability           | compbench                     | T.261 esp.              | Re-encode round-trip determinism; regressions on codec upgrades                          |
+
+### 4.6a Spike-sorting fidelity pipeline (paper §3.2.2, §4.2)
+
+The core scientific question is not "what's the compression ratio?" — the paper's headline claim is "**WavPack Hybrid at 2.25 bps preserves spike waveforms and does not affect sorting accuracy**." Our T.261 lossy Pareto is only interesting if we can make (or disprove) the analogous claim. This subsection specifies the sorting-fidelity pipeline that produces the paper's Fig 10-14 numbers on our reconstructed traces.
+
+**Pipeline stages** (Snakemake rules; each stage is a separate `compbench` subcommand for individual invocation):
+
+1. **`compbench run` (existing)** — encode + decode + full-band + band-limited RMSE + PRDN. Produces `reconstructed.npy` per cell when `--keep-reconstructed`.
+2. **`compbench sort --input reconstructed.npy --sorter kilosort2_5`** *(NEW, Phase 3.5)* — sort the reconstructed traces. Uses `spikeinterface.sorters.run_sorter(sorter_name=..., recording=...)` inside the `compbench-ks25` container (Kilosort 2.5 to match paper). Produces `sorting.pkl` / `sorting.zarr`.
+3. **`compbench compare-sorting`** *(NEW, Phase 3.5)* — two modes:
+    - **`--against-ground-truth mearec.h5`** — GT comparison (simulated data). Uses `spikeinterface.comparison.GroundTruthComparison`. Emits per-cell `sorting.json` with per-unit accuracy/precision/recall + unit-count classifications.
+    - **`--against-baseline lossless-cell-dir`** — pairwise comparison (experimental data). Uses `SymmetricSortingComparison`. Emits per-unit spike-time agreement + excess-spike symmetry + QC pass-fraction.
+4. **`compbench sort-waveforms`** *(NEW, Phase 3.5)* — build `SortingAnalyzer` on baseline + candidate reconstructions, compute peak-to-valley / FWHM / peak-to-trough on main + 60 µm peripheral channels (paper Fig 14).
+5. **Aggregator** flattens the new `sorting.json` files into `report.parquet` alongside the compression metrics.
+
+**Reference codec baselines** in every sorting-eval profile (paper §3.2):
+
+- **Bit truncation** — the paper's simple baseline. Composed as `blosc-zstd` with `numcodecs.FixedScaleOffset(scale=1/2**n)` as the pre-filter. Register as `bittrunc-N` (N=0..7) in `compbench.codecs`.
+- **WavPack Hybrid** — the paper's headline lossy result (`wavpack` with `bps ∈ {6, 5, 4, 3.5, 3, 2.5, 2.25}`). Already registered; profile-driven sweep.
+- **T.261** — our target codec; QP sweep + preset variants.
+
+**Expected sweep dimensions** (paper §3.2 Fig 10 baseline for NP1):
+- ~7 QP points × 2 T.261 presets + 7 WavPack-Hybrid bps + 8 bit-truncation levels = ~29 lossy codec configs
+- Plus 1 lossless baseline per codec family
+- × MEArec-simulated NP1 + NP2 (2 recordings; 100 s slice → ~30 min encode + ~30 min sort per cell)
+- Total: ~60 cells; 30-60 hours wall on 8 CPU + 1 GPU. Fits an overnight run on a modest workstation.
+
+**Container:** `compbench-ks25` (already recipe-defined; needs Kilosort 2.5 to match paper). GPU only needed if user picks Kilosort 4; KS2.5 is CPU. `compbench-base` handles the encode/decode stage.
+
+**Verification target** (Phase 3 close-out):
+- (a) T.261 IndepChannel lossless sorting metrics identical to blosc-zstd L9 (both are lossless → sorting is deterministic given same sorter seed).
+- (b) T.261 QP=1.5 sorting metrics within 5 % of lossless on accuracy/precision/recall (paper's WavPack-Hybrid bps=2.25 claim).
+- (c) T.261 QP=X where X is the "sorting-transparent" boundary — the highest QP that stays within the paper's stated ~10 % waveform-feature error tolerance.
+- (d) Failure modes documented (which units are affected at higher QP; symmetric or biased?).
 
 ### 4.6 Dataset ingestion
 
@@ -394,14 +432,28 @@ Concrete steps:
 
 **Verify:** `zarr.array(x, compressor=T261(preset="EEG_lossless"))[:] == x` on synthetic multichannel data; lossless CR reproduces the ~11× seen on the CLI smoke test; wheel installs cleanly via `pip install t261-numcodecs` on a fresh venv; `compbench list-codecs` shows `t261` post-install.
 
-### Phase 3 — T.261 in the sweep + new metrics (1 week)
+### Phase 3 — T.261 in the sweep + new metrics + sorting fidelity (2 weeks)
 
-- Add T.261 to `configs/codecs/*.yaml` with a matrix of `level`, `lossless/lossy/near-lossless`, `bps` targets matching WavPack-Hybrid's range so plots are apples-to-apples.
-- Implement PRD/PRDN, random-access latency.
-- Run the full paper-comparable sweep on the exact IBL/AIND datasets Buccino et al. used → produce apples-to-apples plots (T.261 vs WavPack vs FLAC vs blosc-zstd on identical inputs).
-- Deliver the first public report: "T.261 in the context of Buccino et al. 2023."
+**3a. Codec + preprocessing sweep** (largely landed 08-20)
+- Add T.261 to `configs/codecs/*.yaml` with a matrix of `level`, `lossless/lossy/near-lossless`, QP targets matching WavPack-Hybrid's bps range so plots are apples-to-apples. ✓
+- Implement band-limited RMSE (paper Fig 4-6), PRD/PRDN. ✓
+- Run the paper-comparable sweep on IBL/AIND datasets + MEArec-simulated. Partial (CSHZAD026 done; 15 more recordings pending on beefier host).
 
-**Verify:** T.261 sits on or beats WavPack on lossless CR (its design claim); document any surprises. Reader can compare T.261 directly against the paper's figures without any dataset caveats.
+**3b. Sorting-fidelity pipeline** (the CORE scientific question — see §4.6a)
+- Add MEArec loader (`compbench.datasets.mearec`). ✓ (skeleton)
+- Implement `compbench.metrics.sorting.{gt_comparison_metrics, sorting_agreement, unit_classification, qc_pass_fraction, waveform_feature_errors}`. Skeleton landed; implementations reference `spikeinterface.comparison.{GroundTruthComparison, SymmetricSortingComparison}` + `spikeinterface.qualitymetrics.compute_quality_metrics`. Full impl deferred to Phase 3.5 [R1-H3].
+- Add `compbench sort` / `compbench compare-sorting` / `compbench sort-waveforms` CLI subcommands.
+- Register `bittrunc-N` (numcodecs.FixedScaleOffset+blosc-zstd) as the paper's other lossy baseline.
+- Run `sorting-eval.yaml` profile on MEArec NP1 (100 s slice first, then full 600 s) + WavPack-Hybrid bps sweep + T.261 QP sweep + bit-truncation. Produce paper Fig 10-14 analogues.
+- Deliver the first public report: "T.261 in the context of Buccino et al. 2023 — compression, distortion, AND sorting fidelity."
+
+**Verify:**
+- **Compression**: T.261 sits on or beats WavPack on lossless CR (its design claim).
+- **Sorting fidelity (simulated)**: T.261 QP=1.5 preserves accuracy/precision/recall within 5 % of lossless (paper's WavPack-Hybrid 2.25 bps benchmark). Higher QPs quantified against the paper's stated ~10 % waveform-feature error tolerance.
+- **Sorting fidelity (experimental)**: T.261 QP=1.5 spike-train agreement > 0.95 vs lossless baseline; excess-spike distribution symmetric around 0.
+- **Where T.261 breaks down**: document the QP boundary beyond which sorting fidelity degrades unacceptably; separate cell-per-cell "safe" vs "aggressive" bands.
+
+Reader can compare T.261 directly against paper Fig 10-14 without dataset caveats.
 
 ### Phase 3.5 — Scale-out fixes (from 5-reviewer synthesis 2026-08-19)
 
@@ -432,11 +484,14 @@ they don't get lost:
   distinct pipeline stage (`compbench preprocess`).
 - **[R4-M5] `LoadedDataset` not frozen; in-place mutation in yaml_loader.**
   Use `dataclasses.replace` for post-load transformations.
-- **[R1-H3] No sorting-fidelity / waveform-features metrics.** Every
-  "acceptable distortion" claim on lossy T.261 needs these before use.
-  Kilosort agreement (against paper's Kilosort 2.5 baseline) + waveform
-  peak-to-valley/FWHM/peak-to-trough (paper's Fig 5-6). Belongs in Phase 3
-  metric expansion.
+- **[R1-H3 — PROMOTED to Phase 3b core, not deferred]** No sorting-fidelity /
+  waveform-features metrics. Every "acceptable distortion" claim on lossy
+  T.261 needs these before use. Skeleton landed 08-20: `compbench.metrics.sorting`
+  + MEArec loader + `configs/profiles/sorting-eval.yaml` + `configs/datasets/mearec-*.yaml`.
+  Implementations pending — requires (a) `spikeinterface.comparison` wiring,
+  (b) new `compbench sort` / `compbench compare-sorting` CLI subcommands,
+  (c) `compbench-ks25` container image built + tested with Kilosort 2.5.
+  See §4.6a for the full pipeline spec (paper §3.2.2, §4.2).
 - **[R1-M4, R5-M4] Chunk-size sweep missing.** Paper Fig 2/7 averages across
   chunk sizes 0.1/1/10 s + shuffle variants. Add to profile matrix.
 

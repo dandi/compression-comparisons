@@ -1,0 +1,5 @@
+loader: mearec
+params:
+  path: sourcedata/aind-ephys-compression/mearec/mearec_NP2.h5
+  start_s: 0.0
+  duration_s: 100.0

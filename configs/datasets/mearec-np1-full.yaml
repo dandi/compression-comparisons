@@ -1,0 +1,9 @@
+# MEArec-simulated NP1 dataset — 600 s, 100 GT units, 10 µV noise.
+# The paper's ground-truth substrate for lossy-compression spike-sorting-fidelity
+# evaluation (Buccino et al. §3.2.2, Figs 10-11).
+#
+# Requires: datalad -C sourcedata/aind-ephys-compression get mearec/mearec_NP1.h5
+# (~19 GB annexed).
+loader: mearec
+params:
+  path: sourcedata/aind-ephys-compression/mearec/mearec_NP1.h5
