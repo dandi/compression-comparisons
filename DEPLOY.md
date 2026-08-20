@@ -452,11 +452,32 @@ invocation for full provenance capture.
 
 Things a fresh deployment will run into that are *not* fixed in code.
 
-- **Spike-sorting fidelity needs a GPU.** Phase 3b (plan §4.6a) runs
-  Kilosort 2.5/4 under CUDA. `compbench.metrics.sorting` is still a
-  contract-only skeleton, the `compbench sort` / `compare-sorting` CLI
-  subcommands don't exist, and `compbench-ks25` has not been built or
-  tested. Nothing in Phase 3a (Fig 2 / Fig 7) needs a GPU.
+- **Spike-sorting fidelity: GPU now available, pipeline still to build.**
+  A CUDA host (A100-PCIE-40GB, driver 590.48.01, CUDA 13.1) was attached
+  2026-08-20 and the full path is verified end to end: MEArec ->
+  band-pass -> Kilosort4 on GPU -> `GroundTruthComparison`, 60 s x 384 ch
+  in 130 s (0.46x realtime), accuracy 0.785 / precision 0.790 / recall
+  0.854 against the 100 ground-truth units. Install with the new
+  `[sorting]` extra.
+
+  Still missing: `compbench.metrics.sorting` is a contract-only skeleton,
+  the `compbench sort` / `compare-sorting` CLI subcommands don't exist,
+  and `configs/profiles/sorting-eval.yaml` has never run. Nothing in
+  Phase 3a (Fig 2 / Fig 7) needs a GPU.
+
+- **The GPU host is a different image — expect a rebuild.** Attaching the
+  GPU swapped the base image: Debian 12 -> 13 (trixie), glibc 2.36 ->
+  2.41, Python 3.11 -> 3.13, and `cmake` / `datalad` / `apptainer` are
+  gone. The `.venv` built against 3.11 dies with a dangling
+  `python -> /usr/bin/python3.11` symlink; rebuild it (`uv venv --python
+  3.13 && uv pip install -e '.[devel,ephys,pipeline,sorting]'`) and
+  reinstall datalad (`uv tool install datalad`). Prebuilt `src/bwc/bin/`
+  binaries survive the move and still run, so BWC does not need cmake
+  again unless you change it. All 354 tests pass on 3.13.
+
+  Note glibc 2.41 does **not** fix WavPack: its bundled builds are 2.35
+  and 2.39, so 2.41 misses just as 2.36 did. Container still required —
+  see §1c item 3.
 - **The paper's per-recording numbers aren't ingested.** The Phase 1
   median-of-8 gate compares against the paper's mean-of-8, which lives in
   the Code Ocean capsule

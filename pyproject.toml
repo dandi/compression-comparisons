@@ -48,6 +48,16 @@ ephys = [
 pipeline = [
     "snakemake>=8.0",
 ]
+sorting = [
+    # Phase 3b — spike-sorting fidelity (plan §4.6a). Needs CUDA at runtime;
+    # `pip install` succeeds on a CPU-only host but `torch.cuda.is_available()`
+    # will be False and Kilosort will refuse to run.
+    "kilosort>=4.0",
+    "torch>=2.0",
+    # MEArec itself, not just the SpikeInterface extractor: `read_mearec`
+    # defers to `neo.rawio.mearecrawio`, which imports MEArec at parse time.
+    "MEArec>=1.9",
+]
 test = [
     "pytest>=7.4",
     "pytest-cov>=4.1",
