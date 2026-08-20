@@ -86,12 +86,59 @@ class Profile:
         return out
 
 
-def load_profile(source: str | Path | dict[str, Any]) -> Profile:
+def _resolve_dataset_spec(spec: str, base_dir: Path | None) -> str:
+    """Make a relative dataset path work regardless of the sweep's CWD.
+
+    Profile YAMLs list datasets the way a reader expects — repo-root-relative,
+    e.g. ``configs/datasets/foo.yaml``. But a paper sweep is run from the
+    STAMPED *study* root (so that `sourcedata/...` inside the dataset YAML
+    resolves, and results land in the study tree), and the study root has no
+    `configs/`. Resolving purely against CWD therefore breaks the exact
+    invocation DEPLOY documents.
+
+    Resolution order, first hit wins:
+
+    1. absolute paths and ``scheme:`` URIs — untouched;
+    2. relative to the CWD — preserves every existing invocation;
+    3. relative to the profile's own directory, then each ancestor of it.
+
+    Step 3 is what makes ``configs/datasets/foo.yaml`` inside
+    ``<repo>/configs/profiles/paper-real.yaml`` resolve to
+    ``<repo>/configs/datasets/foo.yaml`` from any CWD. If nothing matches,
+    the spec is returned unchanged so the loader raises its own
+    FileNotFoundError naming the path the user actually wrote.
+    """
+    p = Path(spec)
+    if p.is_absolute():
+        return spec
+    # A `scheme:` URI (e.g. `synthetic:duration_s=5`) is not a path.
+    if ":" in spec and not p.exists():
+        return spec
+    if p.exists():
+        return spec
+    if base_dir is None:
+        return spec
+    for ancestor in [base_dir, *base_dir.parents]:
+        candidate = ancestor / spec
+        if candidate.exists():
+            return str(candidate)
+    return spec
+
+
+def load_profile(
+    source: str | Path | dict[str, Any],
+    base_dir: str | Path | None = None,
+) -> Profile:
     """Parse a profile from a YAML path or an already-parsed dict.
 
     Both entry points (Snakefile's ``--configfile`` and ``compbench``'s own
     ``--profile`` arg) share this validator so the schema check happens
     exactly once and the same error messages are raised in both cases.
+
+    ``base_dir`` anchors relative dataset paths — see
+    `_resolve_dataset_spec`. It defaults to the profile file's directory
+    when ``source`` is a path; pass it explicitly when handing in an
+    already-parsed dict (Snakemake's ``--configfile`` drops the filename).
     """
     if isinstance(source, dict):
         raw = source
@@ -99,6 +146,8 @@ def load_profile(source: str | Path | dict[str, Any]) -> Profile:
     else:
         p = Path(source)
         label = str(p)
+        if base_dir is None:
+            base_dir = p.resolve().parent
         with p.open() as f:
             raw = yaml.safe_load(f) or {}
     # Strict-key check (round-2 R4-H2): silent typos in profile YAMLs are the
@@ -145,9 +194,10 @@ def load_profile(source: str | Path | dict[str, Any]) -> Profile:
                 f"Profile {label}: codecs[{i}] has unknown key(s) {sorted(unknown)}. "
                 f"Allowed: {sorted(_allowed_codec_keys)} — did you mean `params:`?"
             )
+    anchor = Path(base_dir).resolve() if base_dir is not None else None
     return Profile(
         name=str(name),
-        datasets=[str(d) for d in datasets],
+        datasets=[_resolve_dataset_spec(str(d), anchor) for d in datasets],
         codecs=list(codecs),
         datasets_matrix=matrix,
     )
