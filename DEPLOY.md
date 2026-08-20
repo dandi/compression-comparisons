@@ -6,15 +6,18 @@ CPU (and, for spike-sorting-in-the-loop cells, a GPU). It picks up right
 where the first-run results (`results/dandi-t261-compression-study/derivatives/compbench-2026-08-19-CSHZAD026-slice10s/`)
 leave off.
 
-## Current state (2026-08-19)
+## Current state (2026-08-20)
 
-Two working reproductions live under the STAMPED study at
-`results/dandi-t261-compression-study/derivatives/` — raw and
-band-pass, both on `CSHZAD026` at 10 s slice. Neither the study repo
-nor the tool repo has been pushed to any remote yet, so the "clone from
-`<study-remote>`" instructions in §1 below are aspirational — until
-someone pushes, the study exists only on Yaroslav's dev machine. If
-you're deploying elsewhere, use the sync approach in §1a below.
+Three reproductions live under the STAMPED study at
+`results/dandi-t261-compression-study/derivatives/` — raw, band-pass,
+and band-pass-v2 (round-2 metrics), all on `CSHZAD026` at a 10 s slice.
+
+**The benchmark has been deployed to a second machine** (32-core /
+1 TB / 35 TB, no GPU) and the port is documented in §1c. Neither repo
+has a git remote on either machine — the transfer was a direct copy —
+so the "clone from `<study-remote>`" instructions in §1b remain
+aspirational. Pushing both repos somewhere shared is the outstanding
+housekeeping item.
 
 ## Target hardware
 
@@ -119,6 +122,51 @@ datalad -C sourcedata/aind-ephys-compression get \
 datalad -C sourcedata/aind-ephys-compression get .
 ```
 
+### 1c. Notes from the actual port (2026-08-20)
+
+Four things bit us moving from the laptop to the deploy host. All are
+fixed in the tool repo now, but they are what to expect on machine three.
+
+1. **The `sourcedata` subdataset arrived with an empty worktree.** Its
+   `.git` copied but its checkout did not, so every file showed as a
+   staged deletion and `datalad get` had nothing to resolve. Fix:
+   `git -C sourcedata/aind-ephys-compression reset --hard HEAD`, which
+   restores the annex symlinks. Verify with `git annex info --fast .` —
+   it should report 126 annexed files / 523 GB.
+
+2. **The tool-code submodule pointed `origin` at the source machine's
+   absolute path.** Repoint it before checking out the pinned commit:
+
+   ```bash
+   cd code/compression-comparisons-tools
+   git remote set-url origin /path/to/your/compression-comparisons
+   git -c protocol.file.allow=always fetch origin
+   git checkout --detach "$(git -C ../.. rev-parse HEAD:code/compression-comparisons-tools)"
+   ```
+
+3. **`pip install .[audio]` fails on glibc 2.36.** `wavpack-numcodecs`
+   ships prebuilt binaries for glibc 2.35 and 2.39 only, and Debian 12/13
+   sits between them:
+
+   ```
+   RuntimeError: Could not find a matching the system's glibc version 2.36.
+   Available builds: ['2.35', '2.39']
+   ```
+
+   This matters because WavPack is the paper's *winning* lossy codec, so a
+   T.261-vs-WavPack comparison cannot be made on such a host natively.
+   Install without `[audio]` and run the WavPack cells inside the
+   container (§2), whose AIND base image has a compatible glibc. The
+   Snakefile fails fast with a readable message if a profile asks for a
+   codec that isn't registered, so this cannot silently produce a
+   WavPack-free "full" sweep.
+
+4. **`numcodecs` must stay below 0.16.** 0.16 removed
+   `numcodecs.blosc.cbuffer_sizes`, which `zarr` 2.x imports at module
+   load — so `import zarr`, `import spikeinterface`, and every dataset
+   loader died on a fresh resolve. Now pinned in `pyproject.toml`; if you
+   are installing from an older checkout, add `numcodecs<0.16` by hand.
+
 ### 2. Build the container image
 
 ```bash
@@ -139,76 +187,133 @@ podman build -t compbench-ks4:local -f containers/compbench-ks4.Dockerfile .
 ./containers/to_apptainer.sh compbench-ks4:local
 ```
 
-### 3. Point profiles at the real data
+### 3. Pick a profile
 
-Use the `-sourcedata` variant of the dataset YAMLs — they point at
-paths relative to the STAMPED study root (`sourcedata/aind-ephys-compression/...`):
+Two profiles cover the paper reproduction. Neither needs a hand-written
+dataset YAML — both use the `datasets_matrix:` block, which
+cross-products a recording list with a preprocessing list and
+materialises the expanded YAMLs into
+`<results_dir>/generated-datasets/` as run provenance.
 
-- `configs/datasets/aind-ibl-np1-CSHZAD026-slice10s-sourcedata.yaml` — raw
-- `configs/datasets/aind-ibl-np1-CSHZAD026-slice10s-bp-sourcedata.yaml` — band-pass
+| Profile | Scope | Cells | Wall (32-core) |
+| ------- | ----- | ----: | -------------- |
+| `configs/profiles/paper-real-np1-8.yaml` | 8 NP1 recordings x {raw, band-pass}, 60 s slice | 448 | ~5 h |
+| `configs/profiles/paper-real-16.yaml` | all 16 recordings x {raw, band-pass}, full length | 896 | ~5 days |
+| `configs/profiles/paper-real.yaml` | single recording (CSHZAD026), 10 s — smoke/verify | 21 | ~35 min |
 
-Then edit `configs/profiles/paper-real.yaml`'s `datasets:` list to
-reference the `-sourcedata` variant instead of the dev-machine scratch
-path. To encode the full 1200 s recording (paper setting) instead of
-the 10 s slice, drop the `duration_s` field from the dataset YAML.
+**Run `paper-real-np1-8` first.** The revised Phase 1 gate (plan §5) is a
+*median-of-8* comparison against the paper's mean-of-8, so it needs
+breadth across recordings rather than length within one — a single
+recording at full length is still one point in the paper's distribution.
+If the codec ranking comes out wrong, you want to know that after 5 hours,
+not 5 days. `paper-real-16` then confirms duration-invariance and covers
+NP2.
 
-For the paper-comparable full sweep, add one dataset YAML per recording
-under `configs/datasets/` and reference them all in
-`configs/profiles/paper-real.yaml`. A small helper is on the roadmap;
-until then, `for` loops over template YAMLs work fine.
+To add recordings or preprocessing variants, edit the profile's
+`datasets_matrix:` block — no Python and no new dataset YAMLs:
+
+```yaml
+datasets_matrix:
+  loader: aind-benchmark
+  params: {start_s: 0.0, duration_s: 60.0}   # drop duration_s for full length
+  recordings:
+    - {label: ibl-CSHZAD026, params: {path: sourcedata/aind-ephys-compression/ibl-np1/CSHZAD026_2020-09-04_probe00}}
+  preprocessing:
+    - {label: raw}
+    - {label: bp, steps: [{kind: bandpass, low_hz: 300, high_hz: 6000, order: 4}]}
+```
+
+The older single-dataset YAMLs (`configs/datasets/*-sourcedata.yaml`)
+still work and are still what `paper-real.yaml` uses.
 
 ### 4. Run the sweep
 
-Inside the container, with your desired parallelism:
+**Always run from the STAMPED study root.** That is what makes
+`sourcedata/...` inside each dataset resolve and what puts results in the
+study's `derivatives/` tree. Relative dataset paths inside a profile are
+anchored at the profile file, not at your CWD, so this works from
+anywhere.
 
 ```bash
 # Under the study repo (so paths in results/ land in the right place):
 cd ../..
+PROFILE=code/compression-comparisons-tools/configs/profiles/paper-real-np1-8.yaml
+OUT=derivatives/compbench-$(date -I)-np1-8-slice60s
 
 # Podman/Docker: bind-mount the study, launch the sweep
-podman run --rm -v $PWD:/work -w /work compbench-base:local bash -c '
+podman run --rm -v $PWD:/work -w /work compbench-base:local bash -c "
   snakemake -s code/compression-comparisons-tools/src/compbench/pipeline/Snakefile \
-      --configfile code/compression-comparisons-tools/configs/profiles/paper-real.yaml \
-      --config results_dir=derivatives/compbench-$(date -I) \
-      --cores 32
-'
+      --configfile $PROFILE \
+      --config results_dir=$OUT \
+      --cores 21 --keep-going
+"
 
 # Apptainer/HPC: same shape
 apptainer exec --bind $PWD:/work --pwd /work compbench-base.sif \
   snakemake -s code/compression-comparisons-tools/src/compbench/pipeline/Snakefile \
-      --configfile code/compression-comparisons-tools/configs/profiles/paper-real.yaml \
-      --config results_dir=derivatives/compbench-$(date -I) \
-      --cores 32
+      --configfile $PROFILE \
+      --config results_dir=$OUT \
+      --cores 21 --keep-going
+
+# Host-native (no container) — needs the venv from §0 and a built src/bwc:
+snakemake -s code/compression-comparisons-tools/src/compbench/pipeline/Snakefile \
+    --configfile $PROFILE --config results_dir=$OUT --cores 21 --keep-going
 
 # The AWS S3 read path in the sourcedata subdataset needs network from inside
 # the container. Bind-mount your ~/.aws or the pre-fetched data locally if
 # your compute nodes don't have outbound network (typical on HPC).
 ```
 
-**Wall-time budget:** 16 recordings × 21 cells = 336 cells. Median cell
-walltime on 10 s slices was ~30 s (blosc) to ~600 s (T.261 with QP). At
-1200 s slices (paper setting) each T.261 cell scales ~120× → hours per
-cell. See §"Known scale walls" below for the realistic numbers and
-required mitigations before running at 1200 s.
+**Pick `--cores` from memory, not core count**, for full-length runs — see
+scale wall 3 below. At a 60 s slice, 21-way is comfortable on 128 GB; at
+1200 s budget ~60 GB per concurrent cell.
+
+**Wall-time budget.** Measured per-cell wall times on a 10 s slice of
+CSHZAD026 (384 ch, band-pass), from the v2 derivative's `report.parquet`:
+
+| Cell class                        | 10 s      | x120 → 1200 s |
+| --------------------------------- | --------: | ------------: |
+| T.261 lossy (QP 1.5-8)            | 378-578 s |     13-19 h   |
+| zstd L22                          |     331 s |        11 h   |
+| lzma preset 6                     |     275 s |         9 h   |
+| T.261 IndepChannel lossless       |     175 s |         6 h   |
+| blosc-zlib L9                     |      59 s |         2 h   |
+| everything else (blosc, gzip, lz4)|   13-35 s |     0.4-1.2 h |
+| T.261 joint-channel lossless      | >30 min (timeout) | 60+ h |
+
+Scale linearly in duration and multiply by the cell count. That is where
+the ~5 h / ~5 day figures in §3 come from.
 
 **Note on `--keep-going`:** the Makefile's `paper` / `full` targets pass
 `--keep-going` by default so a single failed cell (T.261 timeout, OOM)
 doesn't block the report of the remaining cells. The aggregator uses
 `rglob("metrics.json")` and tolerates missing cells.
 
-**Known scale walls (from R5 reviewer, 2026-08-19):**
+**Known scale walls (from R5 reviewer, 2026-08-19; status 2026-08-20):**
 
-1. **Bandpass at 1200 s OOMs on <200 GB RAM boxes.** `filtfilt` on 27 GB
-   int16 promotes to 110 GB float64 + internal buffers → ~200-250 GB
-   peak. Mitigation not landed yet — chunk-along-channels or use
-   `sosfiltfilt` on float32.
-2. **T.261 joint-channel EEG lossless times out.** Even at 10 s it
-   exceeds 30 min. At 1200 s it's likely 60+ hours per cell. Exclude
-   from `paper-real.yaml` or chunk by channel-group until Phase 2b
-   pybind11 wrapper is ready.
-3. **Memory-bound parallelism.** Peak RSS per 10 s cell is 2-3 GB; at
-   1200 s expect 24-30 GB. On c7i.16xl (128 GB) only ~4 cells run in
-   parallel. Use r7i.16xl (512 GB) for effective 17-way parallelism.
+1. ~~**Bandpass at 1200 s OOMs on <200 GB RAM boxes.**~~ **Fixed**
+   ([R5-C1]). `preprocessing._bandpass` now filters in channel blocks
+   sized by `max_block_bytes` (default 2 GiB). Exact, not approximate:
+   filtfilt runs along the time axis independently per channel, so a
+   channel block is bit-identical to the whole-array call. Peak is now a
+   few GB instead of 200-250 GB.
+2. **T.261 joint-channel EEG lossless times out.** Still open ([R5-C2]).
+   Even at 10 s it exceeds 30 min; at 1200 s expect 60+ hours per cell.
+   It is deliberately **omitted from `paper-real-np1-8.yaml` and
+   `paper-real-16.yaml`** — re-add once the Phase 2b in-process wrapper
+   or channel-group chunking lands.
+3. ~~**Memory-bound parallelism.**~~ **Largely fixed** ([R5-H2]). The
+   wall was the metric pass, not the codec: `run_cell` promoted both the
+   original and the reconstruction to float64 and handed those to five
+   independent metric functions, ~500 GB peak for one 1200 s lossy cell.
+   `metrics.distortion_summary()` now accumulates every statistic in
+   bounded blocks, and `manifest.array_digest` streams instead of calling
+   `tobytes()`. A 1200 s cell now holds its int16 input plus
+   reconstruction (~55 GB) and a few GB of metric blocks. Budget ~60 GB
+   per concurrent full-length cell; on 1 TB that is ~12-16 way, so cap
+   `--cores` accordingly rather than at the core count.
+4. **`datasets_matrix:` replaces the 48-YAML problem** ([R5-H1], fixed).
+   See §3.
 
 **Adding the joint-channel T.261 lossless cell:** on 384 ch × 10 s data
 this cell exceeds 30 min. On 384 ch × 1200 s (full recording) it will
@@ -283,12 +388,46 @@ re-render?" — is handled entirely by steps 4-5. Concretely:
 Optional: wrap steps 4-5 in a `Makefile` target or a `datalad run`
 invocation for full provenance capture.
 
+## Open items (2026-08-20)
+
+Things a fresh deployment will run into that are *not* fixed in code.
+
+- **Spike-sorting fidelity needs a GPU.** Phase 3b (plan §4.6a) runs
+  Kilosort 2.5/4 under CUDA. `compbench.metrics.sorting` is still a
+  contract-only skeleton, the `compbench sort` / `compare-sorting` CLI
+  subcommands don't exist, and `compbench-ks25` has not been built or
+  tested. Nothing in Phase 3a (Fig 2 / Fig 7) needs a GPU.
+- **The paper's per-recording numbers aren't ingested.** The Phase 1
+  median-of-8 gate compares against the paper's mean-of-8, which lives in
+  the Code Ocean capsule
+  `AllenNeuralDynamics/aind-capsule-ephys-compression-results` (account
+  required). Until those land in
+  `.specify/specs/paper-cited-numbers.yaml`, the gate can only be checked
+  by eye against the published figures. This is the quietest blocker on
+  Phase 1 — the sweep will run and produce a median with nothing to
+  compare it to.
+- **WavPack needs the container on glibc-2.36 hosts.** See §1c item 3.
+  WavPack is the paper's winning lossy codec, so a T.261-vs-WavPack Pareto
+  cannot be produced host-natively on such a machine.
+- **The chunk-size axis is missing** ([R1-M4], [R5-M4]). The paper's
+  Fig 2/Fig 7 average over chunk sizes 0.1 / 1 / 10 s as well as shuffle
+  variants. Our adapters compress whole buffers, so only the shuffle and
+  level axes are swept. This makes our per-codec medians comparable in
+  *ranking* but not exactly in *level* to the paper's.
+- **Neither repo has a git remote.** Both machines hold independent
+  copies with no shared push path.
+- **T.261 joint-channel lossless is excluded from the paper profiles.**
+  See scale wall 2 in §4.
+
 ## Troubleshooting
 
-- **`datalad get` is slow (~5 MB/s):** you're hitting S3 rate-limits from
-  the AWS `--no-sign-request` path. Options: use an AWS-authenticated
-  request (still free from Open Data buckets), or run on an AWS instance
-  in us-west-2 (bucket region) for near-line-rate transfers.
+- **`datalad get` throughput:** measured **~40 MB/s** sustained from the
+  `s3-bucket` special remote on a well-connected US East host with
+  `datalad get -J4` — 27.6 GB (one IBL recording) in 11.6 min, so the
+  whole 523 GB lands in ~3.7 h. If you see the ~5 MB/s that earlier notes
+  warned about, you are being rate-limited on the `--no-sign-request`
+  path: use an AWS-authenticated request (still free from Open Data
+  buckets), or run in us-west-2 (bucket region).
 - **`WorkflowError: codec X not registered`:** the container was built
   without an optional dep. `[audio]` (wavpack) is glibc-sensitive but
   works in the AIND-base image; verify with
