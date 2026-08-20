@@ -348,11 +348,14 @@ The core scientific question is not "what's the compression ratio?" — the pape
 - × MEArec-simulated NP1 + NP2 (2 recordings; 100 s slice → ~30 min encode + ~30 min sort per cell)
 - Total: ~60 cells; 30-60 hours wall on 8 CPU + 1 GPU. Fits an overnight run on a modest workstation.
 
-**Container:** `compbench-ks25` (already recipe-defined; needs Kilosort 2.5 to match paper). GPU only needed if user picks Kilosort 4; KS2.5 is CPU. `compbench-base` handles the encode/decode stage.
+**Container:** `compbench-ks25` (already recipe-defined; needs Kilosort 2.5 to match paper). GPU required for either sorter — Kilosort 2.5 is MATLAB + CUDA MEX, not CPU-only (corrected 2026-08-20). `compbench-base` handles the encode/decode stage.
 
 **Verification target** (Phase 3 close-out):
 - (a) T.261 IndepChannel lossless sorting metrics identical to blosc-zstd L9 (both are lossless → sorting is deterministic given same sorter seed).
-- (b) T.261 QP=1.5 sorting metrics within 5 % of lossless on accuracy/precision/recall (paper's WavPack-Hybrid bps=2.25 claim).
+- (b) T.261 QP=1.5 judged against the endpoints that move — `num_false_positive`,
+  `num_well_detected`, the ordered-agreement curve vs the measured two-run
+  lossless floor, and the 10 % waveform-feature line. (The "within 5 %"
+  criterion previously here was invented and has no power — see §5 Phase 3b.)
 - (c) T.261 QP=X where X is the "sorting-transparent" boundary — the highest QP that stays within the paper's stated ~10 % waveform-feature error tolerance.
 - (d) Failure modes documented (which units are affected at higher QP; symmetric or biased?).
 
@@ -398,9 +401,17 @@ L9/bit, whole-buffer:**
 
 | Recording      | modal sample step | paper LSB | CR raw | CR corrected | gain  |
 | -------------- | ----------------: | --------: | -----: | -----------: | ----: |
-| ibl-CSHZAD026  |                 1 |         1 |  2.558 |        3.111 | 1.22x |
+| ibl-CSHZAD026  |                 1 |         1 |  2.558 |  *(no such condition)* | — |
 | aind-625749    |                12 |        12 |  2.110 |        3.170 | 1.50x |
 | aind-634571    |                12 |        12 |  2.071 |        3.112 | 1.50x |
+
+**RETRACTED 2026-08-20:** an earlier version of this table gave
+ibl-CSHZAD026 a "CR corrected 3.111 / gain 1.22x". That number was produced
+by the bug fixed in `7106d9b` — `lsb_correction` removing the per-channel
+median even at lsb=1. There is no "corrected" condition for a SpikeGLX
+recording: `correct_lsb` is a documented no-op at lsb=1 and the paper marks
+ibl-np1 `{"none": False}`. The row is kept, struck, rather than deleted,
+because it was published.
 
 Three things worth recording:
 
@@ -408,11 +419,11 @@ Three things worth recording:
    AIND samples really do sit on a 12-count grid.
 2. **The effect is ~50% on AIND recordings**, not a rounding-level
    detail. Half the NP1 gate set is AIND, so an uncorrected comparison
-   against the paper would have been meaningless.
-3. Corrected CRs converge across sources (3.11 IBL vs 3.17 AIND) where
-   uncorrected ones diverge (2.56 vs 2.11). Same probe type, so
-   convergence is the expected result and is good evidence the
-   correction is being applied correctly.
+   against the paper would have been meaningless. Corroborated on the
+   paper's own data: the AIND NP1 LSB-on/off CR ratio has median **1.452**
+   (range 0.977-1.794, n=96).
+3. *(Retracted — the "corrected CRs converge across sources" argument that
+   stood here rested on the withdrawn IBL row above.)*
 
 Note when measuring the grid empirically: use the **modal** difference
 between adjacent distinct codes, not a gcd. A handful of samples per
@@ -483,18 +494,60 @@ Ordered by increasing scope; each phase is independently useful and PR-sized.
 
 **Verify (revised 2026-08-19):** the paper's Fig 2 / Fig 7 report **distributions** over 8 NP1 recordings × up to 9 shuffle+level configs (N = 48-72 per codec). A single-recording × single-config point from our sweep is one point in that distribution and will not necessarily hit the paper's mean. The revised gate is:
 
-1. **Ranking match:** our sweep reproduces the paper's codec ordering
-   (lzma > zstd L22 > blosc-zstd L9 > blosc-zlib > gzip ≈ zlib > blosc-lz4hc >
-   blosc-lz4 > lz4) on any single recording. **Necessary but not sufficient.**
-2. **Median-of-8 match:** run our sweep on the same 8 NP1 recordings; take the
-   per-codec median across recordings + configs; compare against the paper's
-   published **median**-of-8. (Corrected 2026-08-20: the paper reports median
-   ± SD, not mean — see §4.6b. Our median is therefore directly comparable.)
-   Target: **within ± 5% of the paper's median, or within the paper's reported
-   SD** (whichever is looser). Both raw (matches Fig 2/6) and band-pass
-   (matches Fig 7) should be reported side-by-side. The comparison is only
-   valid against cells run at the paper's conditions — LSB-corrected,
-   1 s chunks, matching shuffle (§4.6b).
+1. **Ranking match:** our sweep reproduces the paper's codec ordering.
+   **Necessary but not sufficient.** Corrected 2026-08-20 — the ordering
+   previously stated here had two inversions and was in fact our own
+   byte-shuffle-only result mislabelled as the paper's. Derived from
+   `benchmark-lossless.csv` under the capsule's headline filter:
+
+   - NP1: `lzma > blosc-zstd > zstd > gzip ≈ zlib > blosc-zlib >
+     blosc-lz4hc > blosc-lz4 > lz4`
+   - NP2: `lzma > blosc-zstd > zstd > blosc-lz4hc > gzip ≈ zlib >
+     blosc-zlib > blosc-lz4 > lz4`
+
+   The paper says it in prose too (§3.1.4): *"LZMA produces the highest
+   average CR, immediately followed by zstd, whose blosc implementation
+   (blosc-zstd) appears to outperform the numcodecs version (zstd)."*
+   Ordering is condition-dependent; compare only against
+   `paper-reference-lossless.csv` rows at matching conditions.
+2. **Paired per-recording match** (revised 2026-08-20; the previous
+   median-vs-median ±5% criterion was ill-posed — see below). We run *the
+   same 8 recordings* the paper ran, so the comparison is **paired** and
+   between-recording variance is nuisance, not signal.
+
+   For each (recording × codec × exactly-matched config) compute the ratio
+   `ours / theirs` against `paper-reference-lossless.csv`. Gate:
+
+   - **median |ratio − 1| ≤ 2%**, and
+   - **max |ratio − 1| ≤ 5%**, reported per recording so one bad recording
+     is visible rather than averaged away.
+
+   Both raw (Fig 2/6) and band-pass (Fig 7) reported side by side. Valid
+   only against cells at the paper's conditions — LSB-corrected, 1 s
+   chunks, matching level *and shuffle* (§4.6b).
+
+   **Why the old criterion failed, three ways.** (a) *Aggregation
+   mismatch*: it said "median across recordings **+ configs**", but every
+   reference number is single-config. Pooling our configs biases us 10-17%
+   against the stated target — 2-3× the tolerance — so the gate could fail
+   a perfect reproduction. (b) *The ±5% clause was inert*: per-codec
+   SD/median across the 8 NP1 recordings is 7.0-13.9%, so "±5% **or**
+   within SD, whichever is looser" always degenerated to ±1 SD. (c) *It
+   discarded the pairing*: measured, our paired agreement on CSHZAD026 is
+   **0.06% median, 2.5% max** across 11 codecs — the old gate was 50-200×
+   looser than our actual reproducibility, and would have passed a run
+   that was wrong by an order of magnitude.
+
+   Report the pooled median-of-8 as a **descriptive** summary only, never
+   as the gate; and when doing so, compare against the paper's *pooled*
+   Fig-2 medians (NP1 lzma 2.52±0.31, blosc-zstd 2.38±0.36; NP2 1.85,
+   1.76), never against its single-config Fig-6 numbers.
+
+   Note the design is **unbalanced and partly confounded**: IBL recordings
+   have 2 preprocessing conditions and AIND 4 (LSB correction is a no-op on
+   SpikeGLX), so a "median-of-8" over an `lsb` cell is really a median over
+   4 AIND recordings, and `lsb` is fully confounded with `source`. Report
+   LSB effects per-source, never as a main effect.
 3. **con-duct sanity:** peak-RSS ranks codecs plausibly (`lzma` > `blosc-zstd` etc).
 
 The paper's own Results text quotes the medians ± SD we need; they are
@@ -547,7 +600,22 @@ Concrete steps:
 
 **Verify:**
 - **Compression**: T.261 sits on or beats WavPack on lossless CR (its design claim).
-- **Sorting fidelity (simulated)**: T.261 QP=1.5 preserves accuracy/precision/recall within 5 % of lossless (paper's WavPack-Hybrid 2.25 bps benchmark). Higher QPs quantified against the paper's stated ~10 % waveform-feature error tolerance.
+- **Sorting fidelity (simulated).** The "within 5 % of accuracy/precision/
+  recall" criterion previously stated here was **invented** — the paper
+  states no such tolerance — and it has no power. On the paper's own
+  vendored reference data, bit-truncation at 4 bits (CR 29.9, RMSE 4.70)
+  holds accuracy at 0.9979 against a lossless 0.9981, while at 5 bits
+  accuracy collapses to 0.927; a 5 % gate passes the condition the paper
+  flags as catastrophic. The paper makes the point itself: at NP1
+  bit-truncation 5, mean accuracy is "only slightly affected" while
+  false-positive counts **explode** (52 -> 1435) — averaged accuracy hides
+  the failure.
+
+  Use the endpoints that actually move: `num_false_positive` and
+  `num_well_detected` (Fig 11); the ordered spike-train agreement curve
+  against the **measured** two-run lossless floor (Fig 13), not a scalar
+  summary of it; and waveform-feature relative error against the paper's
+  only stated numeric tolerance, the **10 %** line drawn in Fig 14.
 - **Sorting fidelity (experimental)**: T.261 QP=1.5 spike-train agreement > 0.95 vs lossless baseline; excess-spike distribution symmetric around 0.
 - **Where T.261 breaks down**: document the QP boundary beyond which sorting fidelity degrades unacceptably; separate cell-per-cell "safe" vs "aggressive" bands.
 
@@ -729,10 +797,19 @@ this phase exists to remove.
    - The same rule governs every other methodology change that moves a
      number — chunk duration, shuffle variant, filter representation.
      Add a condition; do not silently redefine an old one.
-   - A new sweep goes in a **new dated derivative directory**. Existing
-     ones are never edited. If an old derivative lacks a column a new
-     metric added, that is a fact about when it was run, and the
-     aggregator tolerates it (see [R2-H1]).
+   - A new sweep goes in a **new dated derivative directory**.
+   - **Measurements are immutable; narrative is correctable.** Refined
+     2026-08-20: `metrics.json`, `manifest.json` and `report.parquet` in a
+     committed derivative are never modified — verified, `git log
+     --diff-filter=M` over those paths is empty. A derivative's
+     `RESULTS.md` *may* be corrected in place when it states something
+     false, because leaving a known-wrong claim standing is worse than
+     editing it; the correction must be visible in git history and say
+     what it corrects. (The original wording said "existing ones are never
+     edited", which the repo's own history already contradicted at
+     `a897d39` and `f7b497e`.)
+   - If an old derivative lacks a column a new metric added, that is a
+     fact about when it was run, and the aggregator tolerates it ([R2-H1]).
    - Corollary already applied: `preprocessing._bandpass` deliberately
      stays on `filtfilt` rather than moving to the numerically nicer
      `sosfiltfilt`, because the switch would shift every published

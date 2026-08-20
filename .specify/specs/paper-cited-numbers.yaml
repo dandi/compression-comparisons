@@ -57,6 +57,9 @@ meta:
   capsule_id: 3822095
   statistic: median_plus_minus_sd
   n_per_distribution: 8
+  # Fig 2 pools levels AND shuffles (N = 72 per blosc codec, 48 per
+  # numcodecs codec); Fig 6 is single-config. Never compare a pooled median
+  # against a single-config one -- the mismatch alone is worth 10-17%.
   transcribed_utc: 2026-08-20
   conditions:
     lsb_correction: true
@@ -149,9 +152,10 @@ lossless_raw_derived:
     derived: true
     from_file_size_percent: 52.4
     note: >-
-      The Fig 6 caption and the capsule's cell 43 disagree on the NP2 LZMA
-      shuffle option (caption: bit; code: byte). Treat NP2 LZMA as
-      approximate until the CSV settles it.
+      SETTLED 2026-08-20 by the vendored CSV: byte shuffle, median CR
+      1.910, matching the 52.4% file size exactly. The paper's §3.1.5 prose
+      says byte too; only the Fig 6 caption says bit. Table 2 lists lzma as
+      (no, byte) only, so bit was never an option.
 
 # ---------------------------------------------------------------------
 # Figure 7(b)/(d) — preprocessing. Our `bp` / `lsbbp` condition maps here.
@@ -177,6 +181,76 @@ lossless_bandpass_300_6000:
       filtering.
 
 # ---------------------------------------------------------------------
+# Figure 2 POOLED medians -- levels x shuffles, N = 72 (blosc) / 48
+# (numcodecs). These, not the Fig 6 single-config numbers, are the right
+# target for any pooled comparison. Quoted verbatim in paper §3.1.4 and
+# reproduced exactly from benchmark-lossless.csv.
+# ---------------------------------------------------------------------
+lossless_raw_pooled:
+  - {codec: lzma,       probe: NP1, cr: 2.52, sd: 0.31, n: 48, pooled_over: [level, shuffle]}
+  - {codec: blosc-zstd, probe: NP1, cr: 2.38, sd: 0.36, n: 72, pooled_over: [level, shuffle]}
+  - {codec: lzma,       probe: NP2, cr: 1.85, sd: 0.07, n: 48, pooled_over: [level, shuffle]}
+  - {codec: blosc-zstd, probe: NP2, cr: 1.76, sd: 0.15, n: 72, pooled_over: [level, shuffle]}
+  # NOTE: the paper's NP2 SDs do not reproduce exactly from the capsule
+  # data (computed 0.10 and 0.18 vs the quoted 0.07 and 0.15); the medians
+  # match exactly. Do not use these SDs as gate tolerances.
+
+# ---------------------------------------------------------------------
+# FLAC at channel_chunk_size = -1 -- the condition we can actually
+# produce. Our FLAC cells map HERE, not to the ccs=2 headline above.
+# ---------------------------------------------------------------------
+lossless_raw_flac_ccs_default:
+  - {codec: flac, level: medium, channel_chunk_size: -1, probe: NP1, cr: 2.940}
+  - {codec: flac, level: medium, channel_chunk_size: -1, probe: NP2, cr: 2.016}
+
+# ---------------------------------------------------------------------
+# Band-pass 300-6000 (Fig 7b/d) -- targets for our `bp` / `lsbbp` arms,
+# which previously had none for the general-purpose codecs.
+# Median +/- SD over 8, LSB-corrected, 1 s chunks.
+# ---------------------------------------------------------------------
+lossless_bandpass_reference:
+  - {codec: blosc-zstd, shuffle: bit,  probe: NP1, cr: 3.375, sd: 0.176}
+  - {codec: lzma,       shuffle: byte, probe: NP1, cr: 3.037, sd: 0.151}
+  - {codec: flac,       channel_chunk_size: 2, probe: NP1, cr: 5.292, sd: 0.178}
+  - {codec: wavpack,    probe: NP1, cr: 5.282, sd: 0.202}
+  - {codec: blosc-zstd, shuffle: bit,  probe: NP2, cr: 2.254, sd: 0.129}
+  - {codec: lzma,       shuffle: byte, probe: NP2, cr: 2.179, sd: 0.130}
+  - {codec: flac,       channel_chunk_size: 2, probe: NP2, cr: 3.992, sd: 0.208}
+  - {codec: wavpack,    probe: NP2, cr: 3.853, sd: 0.220}
+
+# ---------------------------------------------------------------------
+# Delta filters (Fig 7a/c) -- median CR over 8, same conditions.
+# `1d` is numcodecs.Delta on the FLATTENED chunk, which is why it HURTS.
+# ---------------------------------------------------------------------
+lossless_delta_reference:
+  - {codec: blosc-zstd, probe: NP1, delta: "no",            cr: 2.79}
+  - {codec: blosc-zstd, probe: NP1, delta: "1d",            cr: 2.71}
+  - {codec: blosc-zstd, probe: NP1, delta: "2d-time",       cr: 3.24}
+  - {codec: blosc-zstd, probe: NP1, delta: "2d-space",      cr: 2.71}
+  - {codec: blosc-zstd, probe: NP1, delta: "2d-time-space", cr: 3.10}
+  - {codec: wavpack,    probe: NP1, delta: "no",            cr: 3.59}
+  - {codec: wavpack,    probe: NP1, delta: "1d",            cr: 2.93}
+  - {codec: wavpack,    probe: NP1, delta: "2d-time",       cr: 3.57}
+  - {codec: blosc-zstd, probe: NP2, delta: "no",            cr: 1.90}
+  - {codec: blosc-zstd, probe: NP2, delta: "2d-time",       cr: 2.13}
+
+# ---------------------------------------------------------------------
+# Non-blosc byte shuffle (paper table 2) -- the axis we could not express
+# until 2026-08-20. Median CR over 8, level=high, LSB-corrected, 1 s.
+# ---------------------------------------------------------------------
+lossless_shuffle_reference:
+  - {codec: gzip, probe: NP1, shuffle: byte, cr: 2.361}
+  - {codec: gzip, probe: NP1, shuffle: "no", cr: 2.180}
+  - {codec: lzma, probe: NP1, shuffle: byte, cr: 2.568}
+  - {codec: lzma, probe: NP1, shuffle: "no", cr: 2.815}   # paper's best NP1
+  - {codec: zstd, probe: NP1, shuffle: byte, cr: 2.464}
+  - {codec: zstd, probe: NP1, shuffle: "no", cr: 2.542}
+  - {codec: lz4,  probe: NP2, shuffle: byte, cr: 1.554}
+  - {codec: lz4,  probe: NP2, shuffle: "no", cr: 1.000}   # 1.55x -- the largest shuffle effect
+  - {codec: lzma, probe: NP2, shuffle: byte, cr: 1.910}   # paper's best NP2
+  - {codec: lzma, probe: NP2, shuffle: "no", cr: 1.842}
+
+# ---------------------------------------------------------------------
 # Headline claims we should be able to reproduce qualitatively.
 # ---------------------------------------------------------------------
 claims:
@@ -187,15 +261,30 @@ claims:
       than the best general-purpose codecs, at the expense of decompression
       speed.
     note: >-
-      Requires wavpack/flac, which need the container on glibc-2.36 hosts
-      (DEPLOY §1c item 3).
+      NOT REPRODUCIBLE AT FACE VALUE. As a CR ratio the paper's own data
+      gives +27% for NP1 (3.59/2.82) and +18% for NP2 (2.26/1.91). The
+      6%/10% figures are file-size PERCENTAGE-POINT statements
+      (35.4% -> 27.9%), and they appear swapped between probes relative to
+      the delta-filtered comparison they match. Do not gate on 6%/10%.
   - id: codec-ranking
     text: >-
-      Expected lossless CR ordering on NP1: lzma > zstd L22 > blosc-zstd >
-      blosc-zlib > gzip ~ zlib > blosc-lz4hc > blosc-lz4 > lz4.
+      Lossless CR ordering, derived from benchmark-lossless.csv under the
+      capsule's headline filter (lsb != 'false', chunk_duration == '1s').
+      NP1: lzma > blosc-zstd > zstd > gzip ~ zlib > blosc-zlib >
+      blosc-lz4hc > blosc-lz4 > lz4.
+      NP2: lzma > blosc-zstd > zstd > blosc-lz4hc > gzip ~ zlib >
+      blosc-zlib > blosc-lz4 > lz4.
+    corroborating_quote: >-
+      LZMA produces the highest average CR, immediately followed by zstd,
+      whose blosc implementation (blosc-zstd) appears to outperform the
+      numcodecs version (zstd).
+    corrected: 2026-08-20
     note: >-
-      This is the "necessary but not sufficient" half of the Phase 1 gate;
-      it is checkable on a single recording.
+      CORRECTED. The ordering previously recorded here (lzma > zstd L22 >
+      blosc-zstd > blosc-zlib > gzip ~ zlib > ...) had two inversions --
+      zstd above blosc-zstd, and blosc-zlib above gzip/zlib -- and was in
+      fact our own byte-shuffle-only result mislabelled as the paper's.
+      Ordering is condition-dependent; compare only at matching conditions.
   - id: lossy-wavpack-hybrid
     text: >-
       WavPack Hybrid is superior to naive bit truncation, achieving a CR of

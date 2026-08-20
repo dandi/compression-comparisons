@@ -1,5 +1,26 @@
 # Second reproduction — CSHZAD026 + band-pass 300–6000 Hz (2026-08-19)
 
+
+> **CORRECTIONS (2026-08-20).** Reviewer audit against the paper's own
+> per-recording data found claims in this note that do not hold. They are
+> corrected inline below and listed here. Measurements in `report.parquet`
+> are unchanged and were never modified (plan §6 decision 6).
+>
+> 1. The "paper's codec ordering" quoted in earlier revisions had two
+>    inversions and was actually our own byte-shuffle-only result. The
+>    paper's NP1 order is `lzma > blosc-zstd > zstd > gzip ~ zlib >
+>    blosc-zlib > blosc-lz4hc > blosc-lz4 > lz4`.
+> 2. Margins stated "over every general-purpose lossless codec" excluded
+>    the paper's actual winners. On this same recording the paper measures
+>    WavPack 5.465 / FLAC 5.464 band-passed, so T.261's real margin is
+>    **~+26 %**, not +105 %.
+> 3. Any statement that a distortion figure implies spike-sorting
+>    transparency is withdrawn. The paper's own lossy data shows RMSE does
+>    not predict sorting outcome: bit-truncation at RMSE 4.70 leaves
+>    accuracy 0.998, while RMSE 5.51 collapses it to 0.927.
+> 4. The paper's per-recording numbers no longer require a Code Ocean
+>    account — the capsule is vendored under `src/`.
+
 Same setup as the first reproduction (`results-2026-08-19-CSHZAD026.md`),
 now with the paper's 300–6000 Hz band-pass preprocessing applied. This
 matches the paper's Fig 7 preprocessing methodology (**not** Fig 2, which

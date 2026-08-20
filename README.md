@@ -5,11 +5,20 @@ newly-standardised **ITU-T T.261 / ISO/IEC 23003-8** ("H.BWC") codec against
 the codec set evaluated in Buccino et al. 2023
 ([J Neural Eng, 10.1088/1741-2552/acf5a4](https://doi.org/10.1088/1741-2552/acf5a4)).
 
-**Status:** Phase 0-3 complete on synthetic data. Ten paper codecs + T.261
-(lossless + QP-swept lossy Pareto) registered. Snakemake sweep runs
-end-to-end. Awaiting real IBL/AIND recordings to reproduce Fig 2/3 of the
-paper. See [`.specify/specs/t261-benchmark-plan.md`](.specify/specs/t261-benchmark-plan.md)
-for the full design.
+**Status (2026-08-20).** Phase 1 reproduction verified against the paper's
+own per-recording results: across 11 lossless codecs on CSHZAD026 at
+matched conditions, **median |Δ| 0.06 %, max 2.5 %**. All 16 benchmark
+recordings (523 GB) are local, and the full paper codec set — including
+WavPack, WavPack Hybrid and FLAC — runs natively.
+
+**Phase 3 is NOT complete.** `compbench.metrics.sorting` is a
+contract-only skeleton: no spike-sorting or spike-train metric is
+implemented yet, so every lossy claim currently rests on signal-level
+distortion (RMSE / PRDN), which the paper's own data shows does not
+predict sorting outcome. See
+[`.specify/specs/t261-benchmark-plan.md`](.specify/specs/t261-benchmark-plan.md)
+for the full design and
+[`DEPLOY.md`](DEPLOY.md) for running it.
 
 ## Prerequisites
 
@@ -75,10 +84,10 @@ pip install -e '.[audio]'
 make paper PROFILE=configs/profiles/paper-with-wavpack.yaml
 ```
 
-Both profiles currently point `datasets:` at synthetic-tiny placeholders.
-Replacing them with real IBL/AIND NWB paths is the last blocker on the
-first public report — see [`.specify/specs/t261-benchmark-plan.md`](.specify/specs/t261-benchmark-plan.md)
-§10.
+The gate profile is `configs/profiles/paper-real-np1-8.yaml` (8 NP1
+recordings x 4 preprocessing conditions x 44 codec configs = 1056 cells);
+`paper-real-16.yaml` extends it to all 16 recordings at full length. Both
+use the `datasets_matrix:` block, so adding a recording is one YAML entry.
 
 ## Layout
 
@@ -89,8 +98,9 @@ first public report — see [`.specify/specs/t261-benchmark-plan.md`](.specify/s
 - `src/t261_numcodecs/` — (Phase 2b, not yet built) proper pybind11 wrapper. The
   current `t261` codec is a subprocess stopgap in `src/compbench/codecs/t261.py`.
 - `containers/` — Dockerfiles derived from AIND's `ghcr.io/allenneuraldynamics/…`
-  ephys-pipeline images; work with docker, podman, and (via `apptainer build ... docker://…`)
-  singularity/apptainer on HPC. Every image builds BWC and registers `t261`.
+  ephys-pipeline images. **Written but never built or run** — no number in
+  this study was produced in a container. Reproducible per-codec images are
+  planned as Phase 4.5.
 - `configs/` — dataset / codec / profile YAMLs. Add datasets by dropping a YAML;
   no Python edits needed.
 - `.specify/specs/` — design docs.

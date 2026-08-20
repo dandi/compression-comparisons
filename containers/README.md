@@ -1,3 +1,13 @@
+> **STATUS (2026-08-20): these images have never been built or run.**
+> No number in this study was produced in a container, and the
+> `container:` directive in the Snakefile is commented out. An earlier
+> claim that the AIND base image carries a WavPack-compatible glibc was
+> **false** — it is glibc 2.31, and WavPack's bundled builds are 2.35 /
+> 2.39. WavPack is instead handled natively via `make wavpack`.
+>
+> Reproducible, digest-pinned per-codec images are planned as Phase 4.5
+> of the plan, with the image digest recorded in each cell's manifest.
+
 # Containers
 
 Three images, all derived from the AIND ephys-pipeline images published to

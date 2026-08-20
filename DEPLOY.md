@@ -26,7 +26,7 @@ scenario (Buccino et al. Fig 2 & 3):
 
 | Component | Minimum       | Recommended                              | Why                                                                 |
 | --------- | ------------- | ---------------------------------------- | ------------------------------------------------------------------- |
-| CPU       | 8 cores       | 32–64 cores                              | 21 codec cells × 16 recordings = 336 cells; `--cores N` parallelism |
+| CPU       | 8 cores       | 32–64 cores                              | ~1000-2500 cells per sweep; `--cores N` parallelism (one process per cell) |
 | RAM       | 32 GB         | 128 GB                                   | Peak RSS ~3 GB per T.261 cell; large blosc L9 chunks add more       |
 | Disk      | 600 GB        | 2 TB                                     | Source data 523 GB + derivatives + a few container images           |
 | GPU       | none for §Fig2 | NVIDIA T4 or better for §Fig3           | Only Kilosort4 (lossy spike-sorting eval) needs CUDA                |
@@ -183,13 +183,27 @@ fixed in the tool repo now, but they are what to expect on machine three.
    Available builds: ['2.35', '2.39']
    ```
 
-   This matters because WavPack is the paper's *winning* lossy codec, so a
-   T.261-vs-WavPack comparison cannot be made on such a host natively.
-   Install without `[audio]` and run the WavPack cells inside the
-   container (§2), whose AIND base image has a compatible glibc. The
-   Snakefile fails fast with a readable message if a profile asks for a
-   codec that isn't registered, so this cannot silently produce a
-   WavPack-free "full" sweep.
+   **Resolved 2026-08-20 — and the container was never the fix.** The
+   glibc check only runs on the fallback branch: `wavpack-numcodecs`
+   links a *system* libwavpack whenever a `wavpack` binary is on PATH.
+   AIND's own `aind-ephys-pipeline-base` is glibc **2.31** (verified by
+   pulling it), so it misses 2.35/2.39 exactly as our 2.36 and 2.41 hosts
+   did — the container recipe previously recommended here could not have
+   worked.
+
+   Build it instead (no root needed):
+
+   ```bash
+   make wavpack        # -> vendor/wavpack, via scripts/build_wavpack.sh
+   export LD_LIBRARY_PATH="$PWD/vendor/wavpack/lib:$LD_LIBRARY_PATH"
+   uv pip install --python .venv/bin/python wavpack-numcodecs
+   ```
+
+   `make` and the Snakefile export both paths for you. Note the extension
+   compiles from source, so it needs `Python.h`: if the distro has no
+   `python3-dev`, build the venv on a uv-managed CPython, which ships
+   headers. Distro packages (`wavpack`, `libwavpack-dev`) are preferred
+   where available.
 
 4. **`numcodecs` must stay below 0.16.** 0.16 removed
    `numcodecs.blosc.cbuffer_sizes`, which `zarr` 2.x imports at module
@@ -227,12 +241,12 @@ materialises the expanded YAMLs into
 
 | Profile | Scope | Cells | Wall (32-core) |
 | ------- | ----- | ----: | -------------- |
-| `configs/profiles/paper-real-np1-8.yaml` | 8 NP1 recordings x {raw, band-pass}, 60 s slice | 448 | ~5 h |
-| `configs/profiles/paper-real-16.yaml` | all 16 recordings x {raw, band-pass}, full length | 896 | ~5 days |
+| `configs/profiles/paper-real-np1-8.yaml` | 8 NP1 x {raw, bp, lsb, lsbbp} x 44 codec configs, 60 s slice | 1056 | ~12 h |
+| `configs/profiles/paper-real-16.yaml` | all 16 recordings, same conditions, full length | 2464 | ~days |
 | `configs/profiles/paper-real.yaml` | single recording (CSHZAD026), 10 s — smoke/verify | 21 | ~35 min |
 
 **Run `paper-real-np1-8` first.** The revised Phase 1 gate (plan §5) is a
-*median-of-8* comparison against the paper's mean-of-8, so it needs
+*median-of-8* comparison against the paper's median-of-8, so it needs
 breadth across recordings rather than length within one — a single
 recording at full length is still one point in the paper's distribution.
 If the codec ranking comes out wrong, you want to know that after 5 hours,
@@ -304,7 +318,7 @@ The sweep parallelises **across the matrix, not within a cell**. Snakemake
 schedules one `run_cell` job per (dataset x codec x chunking) combination and
 runs `--cores N` of them concurrently; each job is one `duct compbench run`
 process that declares `threads: 1`. Cells are fully independent — no barrier,
-no shared state — so a 1008-cell sweep is 1008 single-core jobs, N at a time,
+no shared state — so a 1056-cell sweep is 1008 single-core jobs, N at a time,
 and `--keep-going` means one timeout costs one cell.
 
 That accounting is only honest if the codecs stay single-threaded, and blosc
@@ -475,21 +489,20 @@ Things a fresh deployment will run into that are *not* fixed in code.
   binaries survive the move and still run, so BWC does not need cmake
   again unless you change it. All 354 tests pass on 3.13.
 
-  Note glibc 2.41 does **not** fix WavPack: its bundled builds are 2.35
-  and 2.39, so 2.41 misses just as 2.36 did. Container still required —
+  Note glibc 2.41 does not match WavPack's bundled builds (2.35 / 2.39)
+  either — but that is no longer a blocker, and no container is needed;
   see §1c item 3.
-- **The paper's per-recording numbers aren't ingested.** The Phase 1
-  median-of-8 gate compares against the paper's mean-of-8, which lives in
-  the Code Ocean capsule
-  `AllenNeuralDynamics/aind-capsule-ephys-compression-results` (account
-  required). Until those land in
-  `.specify/specs/paper-cited-numbers.yaml`, the gate can only be checked
-  by eye against the published figures. This is the quietest blocker on
-  Phase 1 — the sweep will run and produce a median with nothing to
-  compare it to.
-- **WavPack needs the container on glibc-2.36 hosts.** See §1c item 3.
-  WavPack is the paper's winning lossy codec, so a T.261-vs-WavPack Pareto
-  cannot be produced host-natively on such a machine.
+- ~~**The paper's per-recording numbers aren't ingested.**~~ **Resolved
+  2026-08-20.** The Code Ocean capsule is exportable and its `data/` asset
+  is CC0; it is vendored at `src/capsule-ephys-compression-results/`.
+  Per-recording results for the lossless, delta, preprocessing, lossy-sim
+  and lossy-exp benchmarks are all local, and
+  `.specify/specs/paper-reference-lossless.csv` is derived from them.
+  No account is required.
+- ~~**WavPack needs the container.**~~ **Resolved** — it needs a system
+  libwavpack on PATH, not a particular glibc. `make wavpack` builds one
+  without root; see §1c item 3. (WavPack is the paper's best *lossless*
+  codec; WavPack **Hybrid** is its lossy one.)
 - **The chunk-size axis is missing** ([R1-M4], [R5-M4]). The paper's
   Fig 2/Fig 7 average over chunk sizes 0.1 / 1 / 10 s as well as shuffle
   variants. Our adapters compress whole buffers, so only the shuffle and
@@ -509,10 +522,12 @@ Things a fresh deployment will run into that are *not* fixed in code.
   warned about, you are being rate-limited on the `--no-sign-request`
   path: use an AWS-authenticated request (still free from Open Data
   buckets), or run in us-west-2 (bucket region).
-- **`WorkflowError: codec X not registered`:** the container was built
-  without an optional dep. `[audio]` (wavpack) is glibc-sensitive but
-  works in the AIND-base image; verify with
-  `podman run compbench-base:local compbench list-codecs`.
+- **`WorkflowError: codec X not registered`:** an optional dependency is
+  missing. For `wavpack`, run `make wavpack` and make sure
+  `LD_LIBRARY_PATH` includes `vendor/wavpack/lib` — a vendored libwavpack
+  the loader cannot see is indistinguishable from an uninstalled codec,
+  and the Snakefile now says so explicitly when it detects that case.
+  Verify with `compbench list-codecs`.
 - **T.261 encode hits the 30-min timeout:** joint-channel lossless on
   wide (384 ch) inputs is known-slow. See §"Adding the joint-channel
   T.261 lossless cell" above.
