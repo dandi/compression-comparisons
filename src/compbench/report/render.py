@@ -47,6 +47,29 @@ def _discriminator(cell_dir: Any) -> str:
     return tag
 
 
+def _dataset_of(cell_dir: Any) -> str:
+    """Dataset half of the `<dataset>__<codec>` cell-directory name."""
+    if not cell_dir:
+        return "—"
+    tag = str(cell_dir).rstrip("/").split("/")[-1]
+    return tag.split("__", 1)[0] if "__" in tag else tag
+
+
+def _preproc_of(row: dict[str, Any]) -> str:
+    """Preprocessing label, falling back to `raw` for pre-[R2-H3] derivatives."""
+    v = row.get("preprocessing_summary")
+    return str(v) if v else "raw"
+
+
+def _median(values: list[float]) -> float:
+    ordered = sorted(values)
+    n = len(ordered)
+    mid = n // 2
+    if n % 2:
+        return ordered[mid]
+    return 0.5 * (ordered[mid - 1] + ordered[mid])
+
+
 def _cr_of(row: dict[str, Any]) -> float:
     """Extract the CR field as a float for sorting; missing → -inf."""
     v = row.get("metric_cr")
@@ -76,17 +99,27 @@ def render_markdown(
         header.extend(["", source_note])
     header.append("")
 
+    # `dataset` and `preproc` matter once a sweep spans more than one
+    # recording: without them every row of a 448-cell paper sweep looks
+    # identical apart from the codec params. `RMSE_bp` is the spike-band
+    # error (paper Fig 4-6 methodology) and `PRDN/ch` is the per-channel
+    # median — the reader-facing distortion figure per plan [R1-H2].
     table = [
-        "| codec | params | CR | enc xRT | dec xRT | RMSE | lossless | wall_s | RSS GB |",
-        "| --- | --- | ---: | ---: | ---: | ---: | :---: | ---: | ---: |",
+        "| dataset | preproc | codec | params | CR | enc xRT | dec xRT | RMSE | "
+        "RMSE_bp | PRDN/ch % | lossless | wall_s | RSS GB |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | :---: | ---: | ---: |",
     ]
     for r in rows_list:
+        dataset = _dataset_of(r.get("cell_dir"))
+        preproc = _preproc_of(r)
         codec = str(r.get("codec_name", "—"))
         disc = _discriminator(r.get("cell_dir"))
         cr = _fmt_num(r.get("metric_cr"))
         enc = _fmt_num(r.get("metric_encode_xrt"), 2)
         dec = _fmt_num(r.get("metric_decode_xrt"), 2)
         rmse = _fmt_num(r.get("metric_rmse"), 4)
+        rmse_bp = _fmt_num(r.get("metric_rmse_band_limited_300_6000"), 4)
+        prdn_ch = _fmt_num(r.get("metric_prdn_per_channel_median_percent"), 2)
         ok_val = r.get("metric_round_trip_ok")
         lossless_cell = "T" if ok_val else "F" if ok_val is False else "—"
         wall = _fmt_num(r.get("duct_wall_time_s"), 2)
@@ -97,8 +130,10 @@ def render_markdown(
             else "—"
         )
         table.append(
-            f"| {codec} | {disc} | {cr} | {enc} | {dec} | {rmse} | {lossless_cell} | {wall} | {rss_gb} |"
+            f"| {dataset} | {preproc} | {codec} | {disc} | {cr} | {enc} | {dec} | "
+            f"{rmse} | {rmse_bp} | {prdn_ch} | {lossless_cell} | {wall} | {rss_gb} |"
         )
+    table.extend(_median_section(rows_list))
 
     # Best lossless / best lossy highlight
     best_lossless: dict[str, Any] | None = None
@@ -133,6 +168,53 @@ def render_markdown(
         highlights.append("- (no cells with a comparable CR field)")
 
     return "\n".join(header + table + highlights) + "\n"
+
+
+def _median_section(rows_list: list[dict[str, Any]]) -> list[str]:
+    """Per-(preprocessing, codec, params) median CR across datasets.
+
+    This is the shape the Phase 1 gate is stated in (plan §5): the paper
+    reports a distribution over 8 NP1 recordings, so the comparable figure
+    from our sweep is the median across recordings, not any single cell.
+    Emitted only when the sweep actually spans more than one dataset —
+    on a single-recording sweep the median is just the row itself.
+    """
+    datasets = {_dataset_of(r.get("cell_dir")) for r in rows_list}
+    if len(datasets) < 2:
+        return []
+
+    groups: dict[tuple[str, str, str], list[float]] = {}
+    for r in rows_list:
+        cr = _cr_of(r)
+        if cr == float("-inf"):
+            continue
+        key = (
+            _preproc_of(r),
+            str(r.get("codec_name", "—")),
+            _discriminator(r.get("cell_dir")),
+        )
+        groups.setdefault(key, []).append(cr)
+
+    out = [
+        "",
+        f"## Median CR across {len(datasets)} datasets",
+        "",
+        "The paper reports distributions over its recording set; this is the "
+        "comparable per-codec figure. `n` is the number of datasets "
+        "contributing — a short `n` means cells are still missing or failed.",
+        "",
+        "| preproc | codec | params | median CR | min | max | n |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: |",
+    ]
+    # Sort by preprocessing, then median CR descending — stable across runs.
+    for (preproc, codec, params), crs in sorted(
+        groups.items(), key=lambda kv: (kv[0][0], -_median(kv[1]), kv[0][1], kv[0][2])
+    ):
+        out.append(
+            f"| {preproc} | {codec} | {params} | {_fmt_num(_median(crs))} | "
+            f"{_fmt_num(min(crs))} | {_fmt_num(max(crs))} | {len(crs)} |"
+        )
+    return out
 
 
 def render_from_parquet(
