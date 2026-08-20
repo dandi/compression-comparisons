@@ -440,6 +440,41 @@ they don't get lost:
 - **[R1-M4, R5-M4] Chunk-size sweep missing.** Paper Fig 2/7 averages across
   chunk sizes 0.1/1/10 s + shuffle variants. Add to profile matrix.
 
+### Phase 3.5 additions from round-2 review (2026-08-20)
+
+- **[R1-H2] Per-channel PRDN.** Current `signal_std` is pooled across all 384
+  channels → PRDN is pooled → underestimates typical per-channel distortion
+  by ~1.8× on this recording. Add `prdn_per_channel_median_percent`, plus
+  IQR + max, to metrics. Report the per-channel-median as the "reader-facing"
+  number in headline tables.
+- **[R2-H2] Sourcedata annex-key in manifest.** `input.provenance.params.path`
+  is currently a filesystem string. Add `datasets/aind_benchmark.py` step that
+  calls `git-annex lookupkey` on the recording file + records the containing
+  subdataset commit SHA. Two runs against the same recording at different
+  git-annex keys are then distinguishable from `manifest.json` alone.
+- **[R2-H3] Surface preprocessing in report.parquet.** Aggregator flattens
+  `input.provenance.preprocessing` into a `preprocessing_summary` column so
+  a stranger reading the parquet can tell raw from band-pass without
+  cross-referencing manifests.
+- **[R4-M3, R5-H1] SHA-256 cache per input file.** `array_digest` is O(N)
+  and runs once per cell → N codec cells × the same input hashed N times.
+  Cache in `run_cell` (or `LoadedDataset.sha256_hex` cached property) to
+  cut ~30 s per 27 GB cell.
+- **[R2-H1] Backfill published pre-round-2 derivatives.** The two 2026-08-19
+  derivatives (`compbench-2026-08-19-CSHZAD026-slice10s` and its `-bandpass`
+  sibling) predate the PRDN/BWC-provenance additions and their `metrics.json`
+  files lack the new columns. Either re-run those sweeps (the v2 landed
+  2026-08-20 handles the bandpass case) or write a `backfill_manifest.py`
+  that fills in what can be reconstructed.
+- **[R3-fact-drift alarm] Numeric drift between docs and parquets.**
+  Whenever `runner.py` grows a new metric field, existing docs cite it from
+  memory. Add `compbench render-report --check-doc <RESULTS.md>` that
+  asserts every quoted number in the doc matches the parquet within 0.01.
+- **[R4-M4] `-sourcedata` YAML duplication.** Two `-{,-sourcedata}` variants
+  per dataset scale badly at 16 recordings × 3 preprocessing. Consider a
+  `path_base:` field or `${SOURCEDATA}` env-var interpolation in the loader
+  so one YAML expresses both scratch and study-relative paths.
+
 ### Phase 4 — Dataset extension (scheduled after Phase 3 report ships)
 
 Two directions, both optional relative to the primary Phase-3 goal:
