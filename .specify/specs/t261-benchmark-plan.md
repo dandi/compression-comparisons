@@ -725,8 +725,40 @@ Two directions, both optional relative to the primary Phase-3 goal:
 
 ## References
 
-- Buccino, A. P. et al. *Compression strategies for large-scale electrophysiology data*, J. Neural Eng. 20, 056001 (2023). [DOI:10.1088/1741-2552/acf5a4](https://doi.org/10.1088/1741-2552/acf5a4)
-- Paper code: <https://github.com/AllenNeuralDynamics/ephys-compression>
+- **Primary paper.** Buccino A P, Winter O, Bryant D, Feng D, Svoboda K,
+  Siegle J H (2023) *Compression strategies for large-scale
+  electrophysiology data*, J. Neural Eng. **20** 056009. Open access,
+  CC-BY 4.0. (Article number corrected 2026-08-20 from 056001, which was
+  wrong.)
+  - DOI / landing: <https://doi.org/10.1088/1741-2552/acf5a4>
+  - Article: <https://iopscience.iop.org/article/10.1088/1741-2552/acf5a4>
+  - PDF: <https://iopscience.iop.org/article/10.1088/1741-2552/acf5a4/pdf>
+  - Supplementary (figures S1-S8, `jneacf5a4supp1.pdf`): reachable from
+    <https://iopscience.iop.org/article/10.1088/1741-2552/acf5a4/data>
+    (the actual file link is a time-limited signed S3 URL, so it must be
+    taken from that page rather than hard-coded)
+  - PubMed: <https://pubmed.ncbi.nlm.nih.gov/37651998/>
+- **Preprint.** bioRxiv 2023.05.22.541700 v2.
+  - DOI: <https://doi.org/10.1101/2023.05.22.541700>
+  - Full text: <https://www.biorxiv.org/content/10.1101/2023.05.22.541700v2.full>
+  - PDF: <https://www.biorxiv.org/content/10.1101/2023.05.22.541700v2.full.pdf>
+- **Benchmark scripts** (produce the results CSVs; MIT):
+  <https://github.com/AllenNeuralDynamics/ephys-compression> — the capsule
+  pins commit `c89e8e481435f39e3bf041bfc0eaac5ef6d93900`.
+- **Analysis capsule** (notebooks that make every figure; MIT, outputs
+  stripped in the GitHub mirror):
+  <https://github.com/AllenNeuralDynamics/aind-capsule-ephys-compression-results>
+  - Code Ocean published capsule id `3822095`, environment image
+    `registry.codeocean.com/published/3d64017a-91ab-4e84-b170-5dfa7a4c4046:v2`
+  - Exported archive vendored at `src/capsule-ephys-compression-results/`.
+    Its `data/` asset (the per-recording results CSVs) is **CC0 1.0**,
+    which is why `.specify/specs/paper-reference-lossless.csv` may be
+    derived from it and committed here.
+- **Benchmark data** (the 16 recordings + MEArec simulations):
+  - AWS Open Data registry: <https://registry.opendata.aws/allen-nd-ephys-compression/>
+  - Bucket: `s3://aind-ephys-compression-benchmark-data`
+  - DataLad mirror we actually use: `///aind-benchmark-data/ephys-compression`
+    → <https://datasets.datalad.org/aind-benchmark-data/ephys-compression/>
 - WavPack numcodecs wrapper: <https://github.com/AllenNeuralDynamics/wavpack-numcodecs>
 - Nextflow pipeline template: <https://github.com/AllenNeuralDynamics/aind-ephys-hybrid-benchmark>
 - DICOM WG-32: <https://www.dicomstandard.org/activity/wgs/wg-32>
