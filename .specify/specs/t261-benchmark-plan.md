@@ -393,6 +393,33 @@ median removal).
 **This is an added axis, not a retrofit** — see §6 decision 6. Both
 corrected and uncorrected AIND numbers are swept and reported.
 
+**Verified on the real recordings (2026-08-20), 2 s slices, blosc-zstd
+L9/bit, whole-buffer:**
+
+| Recording      | modal sample step | paper LSB | CR raw | CR corrected | gain  |
+| -------------- | ----------------: | --------: | -----: | -----------: | ----: |
+| ibl-CSHZAD026  |                 1 |         1 |  2.558 |        3.111 | 1.22x |
+| aind-625749    |                12 |        12 |  2.110 |        3.170 | 1.50x |
+| aind-634571    |                12 |        12 |  2.071 |        3.112 | 1.50x |
+
+Three things worth recording:
+
+1. The paper's table-1 LSB values are directly observable in the data —
+   AIND samples really do sit on a 12-count grid.
+2. **The effect is ~50% on AIND recordings**, not a rounding-level
+   detail. Half the NP1 gate set is AIND, so an uncorrected comparison
+   against the paper would have been meaningless.
+3. Corrected CRs converge across sources (3.11 IBL vs 3.17 AIND) where
+   uncorrected ones diverge (2.56 vs 2.11). Same probe type, so
+   convergence is the expected result and is good evidence the
+   correction is being applied correctly.
+
+Note when measuring the grid empirically: use the **modal** difference
+between adjacent distinct codes, not a gcd. A handful of samples per
+channel sit one count off the grid — the very rounding artefacts the
+paper's median-removal step exists to absorb — and a single off-grid
+value collapses a gcd to 1.
+
 **(b) Chunk duration — `chunk_duration == '1s'` in the headline query.**
 
 The paper compresses through a Zarr store with chunks of (chunk_samples,
