@@ -2,3 +2,7 @@
 	path = src/bwc
 	url = https://vcgit.hhi.fraunhofer.de/vceg-sw/bwc
 	datalad-url = https://vcgit.hhi.fraunhofer.de/vceg-sw/bwc
+[submodule "src/capsule-ephys-compression-results"]
+	path = src/capsule-ephys-compression-results
+	url = ./src/capsule-ephys-compression-results
+	datalad-id = c970ec0e-0504-4ecb-aea5-efbbfff834c4
