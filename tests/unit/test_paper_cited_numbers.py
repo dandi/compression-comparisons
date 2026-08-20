@@ -15,6 +15,7 @@ import yaml
 
 REPO = Path(__file__).resolve().parents[2]
 CITED = REPO / ".specify/specs/paper-cited-numbers.yaml"
+REFERENCE = REPO / ".specify/specs/paper-reference-lossless.csv"
 PROFILES = [
     REPO / "configs/profiles/paper-real-np1-8.yaml",
     REPO / "configs/profiles/paper-real-16.yaml",
@@ -90,3 +91,83 @@ def test_profile_lsb_vars_match_the_paper(profile_path, cited):
             f"{rec['label']}: profile says lsb={rec['vars']['lsb']}, "
             f"paper table 1 says {by_session[session]}"
         )
+
+
+# ---- the transcription vs the capsule's own data -----------------------
+
+
+@pytest.fixture(scope="module")
+def reference():
+    """Per-condition table derived from the capsule's benchmark-lossless.csv."""
+    import csv
+
+    with REFERENCE.open() as f:
+        rows = list(csv.DictReader(line for line in f if not line.startswith("#")))
+    assert rows, "reference table is empty"
+    return rows
+
+
+def _lookup(reference, probe, compressor, level, shuffle=None, ccs=None):
+    """Headline conditions: LSB-corrected, 1 s chunks (plan §4.6b)."""
+    hits = [
+        r
+        for r in reference
+        if r["probe"] == probe
+        and r["compressor"] == compressor
+        and r["level"] == level
+        and r["chunk_duration"] == "1s"
+        and r["lsb_mode"] == "corrected"
+        and (shuffle is None or r["shuffle"] == shuffle)
+        and (ccs is None or r["channel_chunk_size"] == str(ccs))
+    ]
+    assert hits, f"no reference row for {probe}/{compressor}/{level}"
+    return hits
+
+
+@pytest.mark.parametrize(
+    ("probe", "compressor", "level", "shuffle", "ccs", "expected"),
+    [
+        ("NP1", "wavpack", "medium", None, -1, 3.59),
+        ("NP2", "wavpack", "medium", None, -1, 2.26),
+        # FLAC compresses channel PAIRS; at the default -1 its NP1 CR is 2.94.
+        ("NP1", "flac", "medium", None, 2, 3.58),
+        ("NP2", "flac", "medium", None, 2, 2.27),
+        ("NP1", "blosc-zstd", "high", "bit", -1, 2.79),
+        ("NP2", "blosc-zstd", "high", "bit", -1, 1.90),
+        ("NP1", "lzma", "high", "no", -1, 2.82),
+        ("NP2", "lzma", "high", "byte", -1, 1.91),
+    ],
+)
+def test_transcribed_numbers_match_the_capsule_data(
+    reference, probe, compressor, level, shuffle, ccs, expected
+):
+    """Guards the hand-transcription against the authors' own results."""
+    rows = _lookup(reference, probe, compressor, level, shuffle, ccs)
+    assert len(rows) == 1, f"conditions under-specified: {len(rows)} rows matched"
+    assert float(rows[0]["cr_median"]) == pytest.approx(expected, abs=0.005)
+    assert int(rows[0]["n_sessions"]) == 8
+
+
+def test_flac_channel_chunk_size_is_recorded_as_a_condition(cited):
+    """It changes NP1 CR by 22% and the article's prose never states it."""
+    flac = [e for e in cited["lossless_raw"] if e["codec"] == "flac"]
+    assert flac
+    for entry in flac:
+        assert entry["channel_chunk_size"] == 2
+
+
+def test_reference_table_covers_every_paper_codec(reference):
+    codecs = {r["compressor"] for r in reference}
+    assert {
+        "blosc-lz4",
+        "blosc-lz4hc",
+        "blosc-zlib",
+        "blosc-zstd",
+        "gzip",
+        "lz4",
+        "lzma",
+        "zlib",
+        "zstd",
+        "flac",
+        "wavpack",
+    } <= codecs
