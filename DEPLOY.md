@@ -48,6 +48,36 @@ sudo apt-get install -y git datalad git-annex podman apptainer   # or docker/sin
 pipx install uv
 ```
 
+**Check the scratch volume before any sweep.**
+
+```bash
+make env-info
+#   TMPDIR                  = /path/to/compression-comparisons/.tmp
+#   /dev/md124   51T   18T   32T  37%  /path/to/compression-comparisons
+#   COMPBENCH_BLOSC_THREADS = 1
+```
+
+The T.261 adapter round-trips through files, so every in-flight cell holds a
+raw + encoded copy of its input on disk: ~1.5 GB per cell at a 60 s slice,
+~30 GB per cell at full length. Python sends that to `TMPDIR`, which defaults
+to `/tmp` — on a container host that is usually the **root overlay**, shared
+and small. On the machine this was first deployed to, `/` had 58 GB free at
+96 % capacity while the data volume had 32 TB; a 21-way sweep would have
+filled the root filesystem and taken down far more than the sweep.
+
+The committed `.env` therefore sets `COMPBENCH_TMPDIR=.tmp` (repo-relative,
+gitignored, resolved to an absolute path). Both `make` and the Snakefile
+resolve and create it, so the guarantee holds whether you go through `make`,
+call `snakemake` directly, or run inside a container. An explicit `TMPDIR`
+already in the environment always wins — set that to node-local scratch on
+HPC:
+
+```bash
+export TMPDIR=$SLURM_TMPDIR       # or /scratch/$USER/…
+```
+
+`.env` also pins `COMPBENCH_BLOSC_THREADS=1` — see §4 "Parallelism".
+
 ### 1. Clone the study, the tool, and the source data
 
 **Study repo is not yet on a public remote.** Skip to §1a for the
@@ -267,6 +297,36 @@ snakemake -s code/compression-comparisons-tools/src/compbench/pipeline/Snakefile
 **Pick `--cores` from memory, not core count**, for full-length runs — see
 scale wall 3 below. At a 60 s slice, 21-way is comfortable on 128 GB; at
 1200 s budget ~60 GB per concurrent cell.
+
+#### Parallelism
+
+The sweep parallelises **across the matrix, not within a cell**. Snakemake
+schedules one `run_cell` job per (dataset x codec x chunking) combination and
+runs `--cores N` of them concurrently; each job is one `duct compbench run`
+process that declares `threads: 1`. Cells are fully independent — no barrier,
+no shared state — so a 1008-cell sweep is 1008 single-core jobs, N at a time,
+and `--keep-going` means one timeout costs one cell.
+
+That accounting is only honest if the codecs stay single-threaded, and blosc
+does not by default:
+
+- **blosc defaults to 8 threads.** At `--cores 21` that is ~168 threads on a
+  32-core box. Every cell then competes with its neighbours, and `wall_s`,
+  `enc_xRT` and `dec_xRT` become functions of how many other cells happened to
+  be running — not reproducible even on the same host at a different `--cores`.
+- **Multi-threaded blosc is not byte-reproducible.** Above one thread the same
+  input yields a different compressed byte stream on every run. The encoded
+  *length* is stable, so CR — the headline metric — is unaffected and
+  round-trip stays exact, but the artifact itself differs run to run.
+
+`.env` pins `COMPBENCH_BLOSC_THREADS=1`, the Snakefile exports it into every
+cell, and each cell's `manifest.json` records the value under
+`codec.blosc_nthreads`. Set it higher only to reproduce a deliberate
+in-codec-threading throughput measurement.
+
+The one thing that is *not* parallel is the aggregation: `compbench report`
+runs once at the end via Snakemake's `onsuccess`/`onerror` hook, walking every
+`metrics.json`. That is seconds, even at 1008 cells.
 
 **Wall-time budget.** Measured per-cell wall times on a 10 s slice of
 CSHZAD026 (384 ch, band-pass), from the v2 derivative's `report.parquet`:

@@ -10,11 +10,38 @@ UV          ?= uv
 RESULTS_DIR ?= results/smoke
 SMOKE_CELL  ?= $(RESULTS_DIR)/blosc-zstd-l3
 
+# Committed environment (see .env). `-include` so a stripped checkout still
+# builds; the defaults below match the file.
+-include .env
+export
+
+REPO_ROOT   := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+COMPBENCH_TMPDIR        ?= .tmp
+COMPBENCH_BLOSC_THREADS ?= 1
+
+# Codec subprocesses stage raw + encoded copies through TMPDIR; the default
+# /tmp is usually the small root overlay on a container host. Resolve to an
+# absolute path on the same volume as the repo and make sure it exists.
+TMPDIR := $(abspath $(if $(patsubst /%,,$(COMPBENCH_TMPDIR)),$(REPO_ROOT)/$(COMPBENCH_TMPDIR),$(COMPBENCH_TMPDIR)))
+export TMPDIR
+export COMPBENCH_BLOSC_THREADS
+
+.PHONY: scratchdir
+scratchdir:
+	@mkdir -p "$(TMPDIR)"
+
+.PHONY: env-info
+env-info: scratchdir
+	@echo "TMPDIR                  = $(TMPDIR)"
+	@df -h "$(TMPDIR)" | tail -1
+	@echo "COMPBENCH_BLOSC_THREADS = $(COMPBENCH_BLOSC_THREADS)"
+
 .DEFAULT_GOAL := help
 
 .PHONY: help
 help:
 	@echo "Targets:"
+	@echo "  env-info        - show resolved TMPDIR + blosc threads and free space"
 	@echo "  install         - create .venv and install compbench in devel mode"
 	@echo "  test            - unit tests (tox -e py311)"
 	@echo "  lint            - ruff check + format-check (tox -e lint)"
@@ -43,11 +70,11 @@ type:
 	tox -e type
 cov:
 	tox -e cov
-integration:
+integration: scratchdir
 	tox -e integration
 
 .PHONY: smoke
-smoke:
+smoke: scratchdir
 	@rm -rf $(SMOKE_CELL)     # idempotent — duct refuses to overwrite existing output-prefix files
 	@mkdir -p $(SMOKE_CELL)
 	duct \
@@ -71,13 +98,13 @@ render-report:
 	compbench render-report --parquet "$$PARQUET" --output "$${OUT:-AUTO_TABLE.md}" $${TITLE:+--title "$$TITLE"}
 
 .PHONY: paper full snakemake-smoke
-snakemake-smoke:
+snakemake-smoke: scratchdir
 	snakemake -s src/compbench/pipeline/Snakefile \
 	    --configfile configs/profiles/smoke.yaml \
 	    --config results_dir=results/smoke-snakemake \
 	    --cores $${CORES:-2}
 
-paper:
+paper: scratchdir
 	@[ -f "$${PROFILE:-}" ] || (echo "usage: make paper PROFILE=configs/profiles/paper.yaml" && exit 1)
 	snakemake -s src/compbench/pipeline/Snakefile \
 	    --configfile "$$PROFILE" \
@@ -89,7 +116,7 @@ paper:
 # not block the report on the remaining 335. The aggregator is already
 # tolerant of missing cells (rglob("metrics.json")).
 
-full:
+full: scratchdir
 	@[ -f "$${PROFILE:-}" ] || (echo "usage: make full PROFILE=configs/profiles/full.yaml" && exit 1)
 	snakemake -s src/compbench/pipeline/Snakefile \
 	    --configfile "$$PROFILE" \

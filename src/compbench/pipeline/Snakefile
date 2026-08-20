@@ -16,10 +16,45 @@
 # handles conversion to `.sif` at runtime on HPC when invoked with
 # `--use-apptainer` / `--use-singularity`.
 
+import os
 import shlex
 from pathlib import Path
 
 from compbench.pipeline.profile import load_profile, expand_matrix
+
+
+# ---- Scratch volume -------------------------------------------------------
+#
+# Codec adapters that shell out (T.261) stage a raw + encoded copy of every
+# in-flight cell through TMPDIR. Python defaults that to /tmp, which on a
+# container host is typically the small root overlay — filling it takes down
+# far more than the sweep. Resolve it here so the guarantee holds however the
+# workflow was invoked, not only via `make`.
+#
+# Precedence: an explicit TMPDIR in the environment wins (HPC node-local
+# scratch), then COMPBENCH_TMPDIR from .env, then a `.tmp` beside the repo.
+def _resolve_tmpdir() -> str:
+    explicit = os.environ.get("TMPDIR")
+    if explicit:
+        return str(Path(explicit).resolve())
+    repo_root = Path(workflow.basedir).resolve().parents[2]
+    for line in (repo_root / ".env").read_text().splitlines() if (repo_root / ".env").is_file() else []:
+        line = line.strip()
+        if line.startswith("COMPBENCH_TMPDIR="):
+            value = line.split("=", 1)[1].strip()
+            candidate = Path(value)
+            return str(candidate if candidate.is_absolute() else (repo_root / candidate).resolve())
+    return str((repo_root / ".tmp").resolve())
+
+
+TMPDIR = _resolve_tmpdir()
+Path(TMPDIR).mkdir(parents=True, exist_ok=True)
+os.environ["TMPDIR"] = TMPDIR
+
+# Blosc is nondeterministic above one thread (same length, different bytes)
+# and would put `--cores N` x 8 threads on the box while every rule declares
+# `threads: 1`. Parallelism belongs at the cell level.
+os.environ.setdefault("COMPBENCH_BLOSC_THREADS", "1")
 
 
 # ---- Config ---------------------------------------------------------------
@@ -138,6 +173,8 @@ rule run_cell:
     # container: CONTAINER_BASE   # opt-in — comment out for host-native runs
     shell:
         r"""
+        export TMPDIR={TMPDIR:q}
+        export COMPBENCH_BLOSC_THREADS="${{COMPBENCH_BLOSC_THREADS:-1}}"
         mkdir -p {params.cell_dir_q}
         duct \
             --output-prefix {params.cell_dir_q}/duct- \
