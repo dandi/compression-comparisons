@@ -55,6 +55,33 @@ duration we still sit +0.5 % high, which is the expected floor for two
 independent implementations: ours sums `len(encoded_chunk)`, theirs takes
 Zarr's on-disk store size.
 
+## Independent confirmation, both shuffle states (round-2 review)
+
+A second, **separate** measurement was made during the round-2 audit, at
+the same conditions but spanning both shuffle states — including the
+`no`-shuffle cells that the YAML-boolean bug had made unrunnable until
+`1fe35cc`. Reported separately rather than merged into the table above,
+because silently combining two runs into one figure is the error that
+produced the withdrawn number (see below).
+
+| cell (60 s, 1 s chunks) | ours | paper | Δ |
+| --- | ---: | ---: | ---: |
+| `zstd` high / no    | 2.272 | 2.271 | +0.04 % |
+| `gzip` high / byte  | 2.257 | 2.254 | +0.13 % |
+| `gzip` high / no    | 1.948 | 1.948 |  0.00 % |
+| `lz4` high / byte   | 1.357 | 1.357 |  0.00 % |
+| `lz4` high / no     | 1.172 | 1.171 | +0.09 % |
+| `flac` medium (ccs -1) | 2.536 | 2.537 | -0.04 % |
+| `wavpack` medium    | 3.669 | 3.656 | +0.36 % |
+
+Across 11 codec configs spanning both shuffle states: **median ≈ 0.27 %,
+max 0.70 %** — 3-7x inside the gate's `median <= 2 % / max <= 5 %`.
+
+Two agreements worth noting on their own: this is the first check to cover
+the audio codecs (unavailable when the table above was measured), and the
+`no`-shuffle rows are the ones the gate could not previously produce at
+all.
+
 ## Scope — what this does and does not establish
 
 - **Does**: the engine reproduces the paper on one recording across the
