@@ -112,11 +112,19 @@ datasets_matrix:
           order: 4
 
 codecs:
-  # --- blosc family: level x shuffle ------------------------------------
-  # All three shuffle options: the paper's best general-purpose config is
-  # blosc-zstd at high level with BIT shuffling, and LZMA with NO shuffling
-  # for NP1 (plan §4.6b(c)). Sweeping only `byte` — as earlier profiles did
-  # — never measured the paper's best configuration.
+  # ==========================================================================
+  # LEVELS FOLLOW THE PAPER'S OWN MAPPING, from its benchmark-lossless.py:
+  #   blosc {low:1, medium:5, high:9}   zstd {1, 11, 22}   lzma {1, 5, 9}
+  #   zlib  {1, 5, 9}                   gzip {1, 5, 9}     lz4  {9, 5, 1} (inverted)
+  #   flac  {1, 5, 8}                   wavpack {1, 2, 3}
+  # Its headline figures use `high` for the general-purpose codecs and
+  # `medium` for the audio codecs, so that is what is swept here. Earlier
+  # revisions of this profile used gzip 5 / zlib 5 / lzma 6, none of which is
+  # a paper level, making those cells un-comparable.
+  # ==========================================================================
+
+  # --- blosc family: high level x all three shuffles ---------------------
+  # The paper's best Zarr config is blosc-zstd high + BIT shuffle.
   - {codec: blosc-lz4,   params: {level: 9, shuffle: none}}
   - {codec: blosc-lz4,   params: {level: 9, shuffle: byte}}
   - {codec: blosc-lz4,   params: {level: 9, shuffle: bit}}
@@ -130,18 +138,43 @@ codecs:
   - {codec: blosc-zstd,  params: {level: 9, shuffle: byte}}
   - {codec: blosc-zstd,  params: {level: 9, shuffle: bit}}   # paper's best Zarr config
 
-  # --- standard codecs used directly ------------------------------------
-  - {codec: gzip,        params: {level: 5}}
-  - {codec: zlib,        params: {level: 5}}
-  - {codec: lz4,         params: {acceleration: 1}}
-  - {codec: zstd,        params: {level: 3}}
+  # --- standard codecs, all at the paper's `high` ------------------------
+  - {codec: gzip,        params: {level: 9}}
+  - {codec: zlib,        params: {level: 9}}
+  - {codec: lz4,         params: {acceleration: 1}}   # `high` — lz4's mapping is inverted
   - {codec: zstd,        params: {level: 22}}
-  - {codec: lzma,        params: {preset: 6}}
+  - {codec: lzma,        params: {preset: 9}}
+
+  # --- audio codecs: the paper's winners ---------------------------------
+  # Both need a system libwavpack / libFLAC — see .env and
+  # scripts/build_wavpack.sh. `medium` is the level the paper selected for
+  # its Fig 6 comparison, having found high buys almost no CR for a sharp
+  # loss of speed.
+  #
+  # CAVEAT on FLAC: the paper compresses FLAC in 2-channel Zarr chunks
+  # (`channel_chunk_size=2`), worth ~22% CR — NP1 3.58 vs 2.94 at the
+  # default. `flac_numcodecs.Flac` takes no channel argument (it is a Zarr
+  # chunking concept, not a codec one) and we chunk only along time, so
+  # these cells correspond to the paper's ccs=-1 rows. Compare against
+  # those, not against its headline FLAC number.
+  - {codec: flac,        params: {level: 5}}
+  - {codec: wavpack,     params: {level: 2}}                 # lossless
+
+  # --- WavPack Hybrid: the paper's lossy baseline ------------------------
+  # This is the curve T.261's QP sweep is measured against (paper Fig 10-14).
+  - {codec: wavpack,     params: {level: 2, bps: 6.0}}
+  - {codec: wavpack,     params: {level: 2, bps: 5.0}}
+  - {codec: wavpack,     params: {level: 2, bps: 4.0}}
+  - {codec: wavpack,     params: {level: 2, bps: 3.5}}
+  - {codec: wavpack,     params: {level: 2, bps: 3.0}}
+  - {codec: wavpack,     params: {level: 2, bps: 2.5}}
+  - {codec: wavpack,     params: {level: 2, bps: 2.25}}
 
   # --- T.261 / H.BWC lossless -------------------------------------------
   # NOTE: `combinedPresetEEG_lossless` (joint-channel) is deliberately
   # ABSENT — it exceeds the 30-minute cell timeout on 384 ch x 10 s and
   # extrapolates to 60+ h at full length ([R5-C2] in plan §Phase 3.5).
+  #
   # T.261 stays whole-buffer: it is not in the paper, so it needs no 1 s
   # comparability, and the subprocess adapter would spawn one BWC process
   # per second of recording.

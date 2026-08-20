@@ -637,6 +637,49 @@ Two directions, both optional relative to the primary Phase-3 goal:
 
 **Verify:** framework accepts new datasets via one YAML each, no Python edits; per-modality reports render from the same aggregator.
 
+### Phase 4.5 — A container per codec, for reproducible setups (TODO)
+
+**Motivation, learned the hard way.** Every codec in this benchmark has turned
+out to have a host dependency that is invisible until it bites, and each one
+was diagnosed only after it had already produced or blocked a number:
+
+| Codec  | Host dependency | How it surfaced |
+| ------ | --------------- | --------------- |
+| wavpack | `wavpack-numcodecs` links a *system* libwavpack when `wavpack` is on PATH, else demands glibc exactly 2.35 or 2.39 | Unavailable across three hosts (2.36, 2.41) *and* inside AIND's own base image (2.31). The container advice we had written down was wrong. |
+| t261   | BWC compiled from source; needs cmake + a C++20 compiler | Survived a base-image swap only because prebuilt binaries happened to persist |
+| blosc  | Nondeterministic above one thread — same input, different bytes | Only found by hashing output across thread counts |
+| flac   | `flac-numcodecs` has no PyPI release we can pin | Registers only if importable; silently absent otherwise |
+| all    | glibc / Python ABI | A GPU attachment swapped Debian 12→13, glibc 2.36→2.41, Python 3.11→3.13 and killed the venv outright |
+
+Chasing these per-host does not scale and does not reproduce. **Ship a
+container per codec family**, each pinning its own userspace:
+
+- `compbench-codec-audio` — wavpack + flac, on a glibc the upstream wheels
+  actually target; the one image where the audio codecs are known-good.
+- `compbench-codec-t261` — BWC built at a pinned tag, binaries baked in, so
+  `t261` never depends on the host toolchain.
+- `compbench-codec-general` — blosc / zstd / lzma / gzip / zlib, pinned
+  `numcodecs` (remembering that 0.16 broke zarr 2.x).
+- `compbench-sorting` — CUDA + Kilosort, the only image needing a GPU.
+
+Requirements:
+
+1. **A cell records which image produced it.** `manifest.json` gains an
+   `image` block (registry digest, not tag) so a number is traceable to a
+   userspace, the way it already is to a git SHA and a BWC SHA.
+2. **Digest-pinned, not tag-pinned.** `si-0.103.0` is mutable; a digest is not.
+3. **Reproducible across runtimes.** Must work under apptainer sandboxes as
+   well as SIFs — `/dev/fuse` is absent on at least one host here, so SIF
+   mounting fails while `--sandbox` works.
+4. **Publish them.** A reader reproducing our tables should pull an image, not
+   rebuild a toolchain.
+5. **Verify, don't assume.** Every claim of the form "codec X works in image Y"
+   in this repo has to be tested, because the one we inherited was false.
+
+Until this lands, host-native setup is documented in `.env`,
+`scripts/build_wavpack.sh` and DEPLOY §1c — and it is exactly the fragility
+this phase exists to remove.
+
 ### Phase 5 — Polish + publish (1 week)
 
 - Quarto report at `report/index.qmd` renders Parquet → HTML with interactive filters.
