@@ -116,7 +116,15 @@ ignore = [
 quote-style = "double"
 
 [tool.mypy]
-python_version = "3.11"
+# Must track the interpreter mypy actually runs under, not our minimum
+# supported version: numpy's bundled stubs use `type` statements (PEP 695),
+# which mypy refuses to parse when told to assume 3.11 — it fails on
+# numpy/__init__.pyi before reaching any of our code.
+#
+# Real 3.11 compatibility is covered by tox's py311 environment, which
+# resolves a numpy whose stubs match. Keep `requires-python = ">=3.11"`:
+# the AIND container images ship 3.11.
+python_version = "3.13"
 strict = true
 ignore_missing_imports = true
 files = ["src/compbench"]
