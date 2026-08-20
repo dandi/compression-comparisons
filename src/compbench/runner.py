@@ -58,11 +58,12 @@ def encode(
     Returns a list even in the single-chunk case so callers have one shape
     to handle; CR is then `original_bytes / sum(map(len, buffers))`.
     """
-    codec = adapter.make_codec()
     data = dataset.data
     bounds = chunk_bounds(data.shape[0], chunk_samples)
     t0 = time.perf_counter()
-    out = [bytes(codec.encode(np.ascontiguousarray(data[a:b]))) for a, b in bounds]
+    # `encode_chunk` runs the adapter's filter chain then the compressor,
+    # mirroring Zarr's per-chunk pipeline (see CodecAdapter).
+    out = [adapter.encode_chunk(np.ascontiguousarray(data[a:b])) for a, b in bounds]
     dt = time.perf_counter() - t0
     return out, dt
 
@@ -79,7 +80,6 @@ def decode(
     We use the template to reinterpret. `tobytes()` avoids alignment issues
     that `.view(dtype)` can trip on when the codec returns a uint8 array.
     """
-    codec = adapter.make_codec()
     bounds = chunk_bounds(template.shape[0], chunk_samples)
     if len(bounds) != len(encoded):
         raise ValueError(
@@ -91,9 +91,8 @@ def decode(
     flat = out[:, None] if out.ndim == 1 else out
     t0 = time.perf_counter()
     for buf, (a, b) in zip(encoded, bounds, strict=True):
-        raw = codec.decode(buf)
-        raw_bytes = raw.tobytes() if isinstance(raw, np.ndarray) else bytes(raw)
-        flat[a:b] = np.frombuffer(raw_bytes, dtype=template.dtype).reshape(b - a, n_cols)
+        chunk_template = np.empty((b - a, n_cols), dtype=template.dtype)
+        flat[a:b] = adapter.decode_chunk(buf, chunk_template)
     dt = time.perf_counter() - t0
     return out, dt
 

@@ -53,8 +53,8 @@ class _BloscAdapter(CodecAdapter):
 
     _cname: ClassVar[str] = ""
 
-    def __init__(self, level: int | str = 3, shuffle: str = "byte") -> None:
-        super().__init__(level=int(level), shuffle=shuffle)
+    def __init__(self, level: int | str = 3, shuffle: str = "byte", delta: str = "no") -> None:
+        super().__init__(level=int(level), shuffle=shuffle, delta=delta)
         if shuffle not in _SHUFFLE:
             raise ValueError(f"shuffle must be one of {list(_SHUFFLE)}; got {shuffle!r}")
         self._level = int(level)
