@@ -35,7 +35,7 @@ The deliverable is **not** a paper; it is infrastructure + a reference report. A
 
 **Codecs (lossy):** bit-truncation on top of `blosc-zstd`; **WavPack-Hybrid** at 2.25 – 6 bps.
 
-**Metrics:** compression ratio (CR); compression speed and decompression speed as `×RT` (multiples of real-time on a 16-CPU AWS EC2 node); RMSE after 300–6000 Hz band-pass filter; spike-sorting accuracy/precision/recall with Kilosort 2.5 (ground-truth on simulated data, agreement-based curation on experimental); waveform-feature errors (peak-to-valley, FWHM, peak-to-trough).
+**Metrics:** compression ratio (CR); compression speed and decompression speed as `×RT` (multiples of real-time on a 16-CPU AWS EC2 node); RMSE after 300–6000 Hz band-pass filter; spike-sorting accuracy/precision/recall with Kilosort 2.5 (ground-truth on simulated data, agreement-based curation on experimental); waveform-feature errors (peak-to-valley, half_width — the SI metric name; the paper's prose says half_width but its code computes half_width — and peak-to-trough).
 
 **Infrastructure:** the paper's code lives in [`AllenNeuralDynamics/ephys-compression`](https://github.com/AllenNeuralDynamics/ephys-compression) — a collection of ~7 Python scripts (`benchmark-lossless.py`, `benchmark-lossless-delta.py`, `benchmark-lossless-preprocessing.py`, `benchmark-lossy-{sim,exp}.py`, `generate-gt-neuropixels-data.py`, `prepare_data_for_compression.py`). **No orchestration, no container, no single entry point, S3 bucket hard-coded.** Zarr I/O uses a SpikeInterface Zarr backend that landed upstream.
 
@@ -317,8 +317,8 @@ Correctness metrics live in `compbench` (`metrics.json`). Cost/throughput metric
 | **Sorting accuracy / precision / recall** | compbench.metrics.sorting | **simulated ephys lossy** | **Paper Fig 10** — per-GT-unit distributions; requires MEArec ground-truth loader        |
 | **Unit classification counts**| compbench.metrics.sorting     | **ephys lossy**         | **Paper Fig 11-12** — well_detected / false_positive / redundant / overmerged           |
 | **Spike-train agreement**     | compbench.metrics.sorting     | **experimental ephys**  | **Paper Fig 13** — spike-time overlap fraction vs lossless baseline; excess-spike symmetry |
-| **Waveform-feature errors**   | compbench.metrics.sorting     | **ephys lossy**         | **Paper Fig 14** — peak-to-valley, FWHM, peak-to-trough on main + peripheral (60 µm) channels |
-| **QC pass fraction**          | compbench.metrics.sorting     | **experimental ephys**  | Siegle 2021 curation (ISI viol < 0.1, presence > 0.9, amp cutoff < 0.1); Fig 12 summary   |
+| **Waveform-feature errors**   | compbench.metrics.sorting     | **ephys lossy**         | **Paper Fig 14** — peak-to-valley, half_width, peak-to-trough on main + peripheral (60 µm) channels |
+| **QC pass fraction**          | compbench.metrics.sorting     | **experimental ephys**  | Siegle 2021 curation (ISI-viol-ratio < 0.5, presence > 0.95, amp cutoff < 0.1); Fig 12 summary   |
 | Random-access p50/p99         | compbench                     | all (esp. T.261 & Zarr) | Latency of `arr[t0:t1, :]` for random chunks — new; leverages T.261's block index        |
 | Bitstream stability           | compbench                     | T.261 esp.              | Re-encode round-trip determinism; regressions on codec upgrades                          |
 
@@ -332,13 +332,13 @@ The core scientific question is not "what's the compression ratio?" — the pape
 2. **`compbench sort --input reconstructed.npy --sorter kilosort2_5`** *(NEW, Phase 3.5)* — sort the reconstructed traces. Uses `spikeinterface.sorters.run_sorter(sorter_name=..., recording=...)` inside the `compbench-ks25` container (Kilosort 2.5 to match paper). Produces `sorting.pkl` / `sorting.zarr`.
 3. **`compbench compare-sorting`** *(NEW, Phase 3.5)* — two modes:
     - **`--against-ground-truth mearec.h5`** — GT comparison (simulated data). Uses `spikeinterface.comparison.GroundTruthComparison`. Emits per-cell `sorting.json` with per-unit accuracy/precision/recall + unit-count classifications.
-    - **`--against-baseline lossless-cell-dir`** — pairwise comparison (experimental data). Uses `SymmetricSortingComparison`. Emits per-unit spike-time agreement + excess-spike symmetry + QC pass-fraction.
-4. **`compbench sort-waveforms`** *(NEW, Phase 3.5)* — build `SortingAnalyzer` on baseline + candidate reconstructions, compute peak-to-valley / FWHM / peak-to-trough on main + 60 µm peripheral channels (paper Fig 14).
+    - **`--against-baseline lossless-cell-dir`** — pairwise comparison (experimental data). Uses `compare_multiple_sorters (match_score=0.9)`. Emits per-unit spike-time agreement + excess-spike symmetry + QC pass-fraction.
+4. **`compbench sort-waveforms`** *(NEW, Phase 3.5)* — build `SortingAnalyzer` on baseline + candidate reconstructions, compute peak-to-valley / half_width / peak-to-trough on main + 60 µm peripheral channels (paper Fig 14).
 5. **Aggregator** flattens the new `sorting.json` files into `report.parquet` alongside the compression metrics.
 
 **Reference codec baselines** in every sorting-eval profile (paper §3.2):
 
-- **Bit truncation** — the paper's simple baseline. Composed as `blosc-zstd` with `numcodecs.FixedScaleOffset(scale=1/2**n)` as the pre-filter. Register as `bittrunc-N` (N=0..7) in `compbench.codecs`.
+- **Bit truncation** — the paper's simple baseline. Composed as `blosc-zstd` with `numcodecs.FixedScaleOffset(scale=1/2**n)` as the pre-filter. Register ONE `bittrunc` codec taking a `bits` param (0..7) — not eight registry keys; `wavpack` takes `bps` as a param, not `wavpack-2.25` in `compbench.codecs`.
 - **WavPack Hybrid** — the paper's headline lossy result (`wavpack` with `bps ∈ {6, 5, 4, 3.5, 3, 2.5, 2.25}`). Already registered; profile-driven sweep.
 - **T.261** — our target codec; QP sweep + preset variants.
 
@@ -351,7 +351,11 @@ The core scientific question is not "what's the compression ratio?" — the pape
 **Container:** `compbench-ks25` (already recipe-defined; needs Kilosort 2.5 to match paper). GPU required for either sorter — Kilosort 2.5 is MATLAB + CUDA MEX, not CPU-only (corrected 2026-08-20). `compbench-base` handles the encode/decode stage.
 
 **Verification target** (Phase 3 close-out):
-- (a) T.261 IndepChannel lossless sorting metrics identical to blosc-zstd L9 (both are lossless → sorting is deterministic given same sorter seed).
+- (a) A **two-run lossless null control** is required, and is not expected to be
+  perfect. Kilosort is not deterministic — see the expanded note in Phase 3b
+  and `metrics.sorting.run_to_run_floor`. An earlier revision of this line
+  claimed lossless sorting is "deterministic given same sorter seed", which is
+  the opposite of the paper's finding.
 - (b) T.261 QP=1.5 judged against the endpoints that move — `num_false_positive`,
   `num_well_detected`, the ordered-agreement curve vs the measured two-run
   lossless floor, and the 10 % waveform-feature line. (The "within 5 %"
@@ -390,7 +394,7 @@ Per-session LSB values are in the paper's table 1:
 | MEArec   | NP1/NP2 | simulated | 0.195            | 12 / 3 |
 
 So 4 of the 8 NP1 recordings in our gate need it, and all 8 NP2. IBL
-recordings are unaffected (LSB 1 → the correction is a no-op beyond
+recordings are unaffected (LSB 1 -> `correct_lsb` applies NO operation at all;
 median removal).
 
 **This is an added axis, not a retrofit** — see §6 decision 6. Both
@@ -516,7 +520,12 @@ Ordered by increasing scope; each phase is independently useful and PR-sized.
    between-recording variance is nuisance, not signal.
 
    For each (recording × codec × exactly-matched config) compute the ratio
-   `ours / theirs` against `paper-reference-lossless.csv`. Gate:
+   `ours / theirs` against the paper's **per-session** rows in
+   `src/capsule-ephys-compression-results/data/ephys-compression-results/`
+   `results-lossless/benchmark-lossless.csv`. (Not
+   `paper-reference-lossless.csv` — that table is aggregated over sessions
+   and has no `session` column, so a paired comparison cannot be computed
+   from it.) Gate:
 
    - **median |ratio − 1| ≤ 2%**, and
    - **max |ratio − 1| ≤ 5%**, reported per recording so one bad recording
@@ -534,7 +543,15 @@ Ordered by increasing scope; each phase is independently useful and PR-sized.
    SD/median across the 8 NP1 recordings is 7.0-13.9%, so "±5% **or**
    within SD, whichever is looser" always degenerated to ±1 SD. (c) *It
    discarded the pairing*: measured, our paired agreement on CSHZAD026 is
-   **0.06% median, 2.5% max** across 11 codecs — the old gate was 50-200×
+   **0.2% median, 1.5% max across 11 codecs** at matched conditions (see
+   `.specify/specs/results-2026-08-20-paired-reproduction.md`, the citable
+   record) — the old +/-1SD gate was roughly 40-70x looser than that.
+
+   (An earlier revision cited "0.06% median, 2.5% max" here. It conflated
+   that run's codec count with deltas computed against the committed
+   whole-buffer derivative at the paper's 1 s-chunk rows — a
+   mismatched-conditions comparison, which is exactly the error this gate
+   exists to prevent. Withdrawn.)
    looser than our actual reproducibility, and would have passed a run
    that was wrong by an order of magnitude.
 
@@ -592,7 +609,7 @@ Concrete steps:
 
 **3b. Sorting-fidelity pipeline** (the CORE scientific question — see §4.6a)
 - Add MEArec loader (`compbench.datasets.mearec`). ✓ (skeleton)
-- Implement `compbench.metrics.sorting.{gt_comparison_metrics, sorting_agreement, unit_classification, qc_pass_fraction, waveform_feature_errors}`. Skeleton landed; implementations reference `spikeinterface.comparison.{GroundTruthComparison, SymmetricSortingComparison}` + `spikeinterface.qualitymetrics.compute_quality_metrics`. Full impl deferred to Phase 3.5 [R1-H3].
+- Implement `compbench.metrics.sorting.{gt_comparison_metrics, sorting_agreement, unit_classification, qc_pass_fraction, waveform_feature_errors}`. Skeleton landed; implementations reference `spikeinterface.comparison.{GroundTruthComparison, compare_multiple_sorters (match_score=0.9)}` + `spikeinterface.qualitymetrics.compute_quality_metrics`. Full impl deferred to Phase 3.5 [R1-H3].
 - Add `compbench sort` / `compbench compare-sorting` / `compbench sort-waveforms` CLI subcommands.
 - Register `bittrunc-N` (numcodecs.FixedScaleOffset+blosc-zstd) as the paper's other lossy baseline.
 - Run `sorting-eval.yaml` profile on MEArec NP1 (100 s slice first, then full 600 s) + WavPack-Hybrid bps sweep + T.261 QP sweep + bit-truncation. Produce paper Fig 10-14 analogues.
@@ -602,14 +619,19 @@ Concrete steps:
 - **Compression**: T.261 sits on or beats WavPack on lossless CR (its design claim).
 - **Sorting fidelity (simulated).** The "within 5 % of accuracy/precision/
   recall" criterion previously stated here was **invented** — the paper
-  states no such tolerance — and it has no power. On the paper's own
-  vendored reference data, bit-truncation at 4 bits (CR 29.9, RMSE 4.70)
-  holds accuracy at 0.9979 against a lossless 0.9981, while at 5 bits
-  accuracy collapses to 0.927; a 5 % gate passes the condition the paper
-  flags as catastrophic. The paper makes the point itself: at NP1
-  bit-truncation 5, mean accuracy is "only slightly affected" while
-  false-positive counts **explode** (52 -> 1435) — averaged accuracy hides
-  the failure.
+  states no such tolerance.
+
+  What the vendored reference data actually shows is more interesting than
+  the argument first written here. At NP1 bit-truncation 5, accuracy does
+  drop 0.9981 -> 0.9268 (-7.1 %), so a 5 % accuracy gate would *fail* it —
+  the paper's own prose ("only slightly affected") is contradicted by its
+  own released numbers. But the failure is far more visible in the unit
+  counts: false positives go **52 -> 1435** while `num_well_detected` only
+  drops 100 -> 90. And the gate is still the wrong instrument: at
+  bit-truncation *4* (CR 29.9, RMSE 4.70) accuracy holds at 0.9979 and a
+  5 % gate passes, yet false positives are already rising. A scalar
+  accuracy summary is a lagging indicator of a failure the unit counts
+  show first.
 
   Use the endpoints that actually move: `num_false_positive` and
   `num_well_detected` (Fig 11); the ordered spike-train agreement curve
@@ -760,8 +782,8 @@ this phase exists to remove.
 
 1. **Orchestrator: Snakemake.** ✓ Confirmed. Python-native, cleaner SLURM/K8s integration than raw scripts, no JVM dependency.
 2. **Containers: reuse the AIND per-step image family from `ghcr.io/AllenNeuralDynamics/…`** (see [`aind-ephys-pipeline` architecture](https://aind-ephys-pipeline.readthedocs.io/en/latest/architecture.html)), pinned at tag `si-0.103.0` to match their published pipeline. Three derived images (§4 layout):
-   - `compbench-base`  — CPU-only; FROM `aind-ephys-pipeline-base`; hosts `compbench` + `t261-numcodecs` + `wavpack-numcodecs` + `con-duct`. Used for all compression cells and the compression-only ×RT/CR sweep.
-   - `compbench-ks25` — CPU-only; FROM `aind-ephys-spikesort-kilosort25`; adds `compbench`. Used for **paper-reproduction lossy runs** (KS2.5 was the paper's sorter).
+   - `compbench-base`  — CPU-only; FROM `aind-ephys-pipeline-base`; hosts `compbench` + `t261-numcodecs` + `con-duct`. **Note (2026-08-20): this image cannot supply WavPack** — it is glibc 2.31 and `wavpack-numcodecs` needs 2.35/2.39; WavPack is handled natively (see §Phase 4.5 and `scripts/build_wavpack.sh`). Never built or run to date.
+   - `compbench-ks25` — **CUDA required** (KS2.5 is MATLAB + CUDA MEX, not CPU-only); FROM `aind-ephys-spikesort-kilosort25`; adds `compbench`. Used for **paper-reproduction lossy runs** (KS2.5 was the paper's sorter).
    - `compbench-ks4`  — **CUDA-required**; FROM `aind-ephys-spikesort-kilosort4`; adds `compbench`. Used when the configured sorter is KS4 (default for new-dataset runs).
    The per-step split means the compression sweep never pays the GPU-image size/pull cost; only lossy-eval cells that actually sort do.
 3. **Spike sorter: configurable per run; paper reproduction pins Kilosort 2.5.** `configs/profiles/paper.yaml` → sorter=`kilosort2_5`, image=`compbench-ks25`. `configs/profiles/full.yaml` (new-dataset runs) → sorter=`kilosort4`, image=`compbench-ks4`. `spykingcircus2` also registered but not on the default path.
@@ -853,7 +875,9 @@ this phase exists to remove.
 
 1. `git clone && make smoke` → passes on a laptop with Docker in < 5 min.
 2. A user can run a single experiment with one command — no Snakemake, no Docker: `duct compbench run --input my.nwb --codec t261 --codec-params level=3,bps=2.25 --output-dir /tmp/x` produces `metrics.json` + `duct-*.jsonl`.
-3. `make paper DATASET=configs/datasets/ibl-np1-sample.yaml` → reproduces Buccino et al. Fig 2/3 numbers within ± 5%.
+3. `make paper PROFILE=configs/profiles/paper-real-np1-8.yaml` -> reproduces
+   Buccino et al. Fig 2/6/7 within the paired tolerance of §5 (median |ratio-1|
+   <= 2%, max <= 5%, per recording).
 4. `make full` → produces a Parquet table + HTML report comparing T.261 against every codec in the paper on ≥ 1 ephys and ≥ 1 clinical modality dataset, with cost columns (peak RSS, mean CPU %) sourced from con-duct alongside correctness columns from `compbench`.
 5. A DICOM WG-32 member (or a DANDI dev) can add a new dataset via one YAML file and rerun without touching Python.
 6. The `t261-numcodecs` wrapper is installable, tested, and used by at least one external consumer (candidate: `dandi-cli` or `pynwb`) as a validation of API cleanliness.

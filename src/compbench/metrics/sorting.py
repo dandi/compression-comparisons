@@ -9,8 +9,9 @@ Two evaluation modes:
 
 2. **Against lossless baseline (experimental data):** sort both the
    lossless-decoded output and the lossy-decoded output; compare via
-   `SymmetricSortingComparison`; report per-unit spike-time agreement
-   fraction. Also apply the Siegle et al. 2021 automatic curation
+   `compare_multiple_sorters(..., match_score=0.9)` and take the diagonal
+   of the ordered agreement matrix. (NOT `SymmetricSortingComparison` —
+   that was wrong here even after the function below was corrected.) Also apply the Siegle et al. 2021 automatic curation
    (ISI-violations-ratio < 0.5, presence-ratio > 0.95, amplitude-cutoff < 0.1) and
    report passing/failing unit fractions.
 
@@ -92,10 +93,10 @@ def sorting_agreement(
     Compute both variants the paper computes: on curated sortings (Fig 13)
     and on raw ones (Fig S8a/c).
 
-    **This is only interpretable against a measured noise floor.** Kilosort
-    is not deterministic: two runs on identical lossless data do not agree
-    perfectly, and the paper draws that two-run curve as the reference line
-    on every agreement figure. See `run_to_run_floor`.
+    **This is only interpretable against a measured noise floor** — on
+    EXPERIMENTAL data. See `run_to_run_floor` for the scope: the paper's
+    nondeterminism finding is about its experimental sessions, and its own
+    simulated sortings turn out to be bit-identical between runs.
 
     Returns:
         {
@@ -117,8 +118,24 @@ def run_to_run_floor(
     Buccino et al. §3.2.2: *"Even for two separate spike sorting runs
     applied to the same lossless data ... the detected spike trains do not
     match perfectly ... attributed to the inherent run-by-run variability
-    for Kilosort 2.5."* Their driver builds it by comparing one strategy's
-    lossless sorting against the other strategy's lossless sorting.
+    for Kilosort 2.5."*
+
+    **Scope, measured against the paper's own released sortings.** That
+    statement holds for EXPERIMENTAL data — on CSHZAD026 the factor-0
+    curated curve has median 0.9716 with only 68 % of units at or above
+    0.9. It does NOT hold for their simulated data: the NP1 and NP2
+    `bit_truncation-0` vs `wavpack-0` sortings are **bit-identical**, so
+    the MEArec floor is exactly 1.0. (The mean ordered agreement reads
+    0.9937 / 0.9803 only because a few sorter units are empty — the sim
+    driver never calls `remove_empty_units`.)
+
+    So the floor must be *measured*, not assumed in either direction: do
+    not assume it is 1.0 on experimental data, and do not assume it is
+    below 1.0 on simulated data.
+
+    Construction: the paper's floor is not two runs of one config. It is
+    strategy A at factor 0 versus strategy B at factor 0 — two different
+    lossless codecs, one sorter run each.
 
     Without this, an agreement drop at a given codec setting cannot be
     attributed: it may be the codec or it may be the sorter. Kilosort 4
@@ -256,12 +273,31 @@ def waveform_feature_errors(
     channel plus the nearest channels at each of `distances_um`
     (paper: 0 / 30 / 60 / 90 um; Fig 14 plots 0 and 60).
 
-    Features are SpikeInterface `compute_template_metrics` names — three
-    are plotted: `peak_to_valley`, `half_width`, `peak_trough_ratio`.
-    (Note `half_width`, not "full-width half-maximum" as previously
-    written here; the paper's prose says FWHM but its code computes
-    SpikeInterface's `half_width`.) `repolarization_slope` and
-    `recovery_slope` are computed by the paper but not plotted.
+    **Metric names changed between SpikeInterface versions**, and one of
+    the three changed meaning. The paper ran SI 0.97.1; we have 0.104.8:
+
+    ===================  ==========================  ==================
+    paper (0.97.1)       modern (0.104.8)            equivalent?
+    ===================  ==========================  ==================
+    peak_to_valley       peak_to_trough_duration     yes (exact)
+    peak_trough_ratio    peak_after_to_trough_ratio  yes (up to sign)
+    half_width           trough_half_width           **NO**
+    ===================  ==========================  ==================
+
+    0.97.1's `get_half_width` takes the *outermost* half-amplitude
+    crossings across the whole window; 0.104's takes the crossings adjacent
+    to the trough. Measured over the paper's own 400 NP1 (unit x channel)
+    templates the p90 relative difference is **57 %** — five times the 10 %
+    line Fig 14 is judged against. Compute both, report which, and never
+    overlay the 0.104 definition on Fig 14.
+
+    `repolarization_slope` and `recovery_slope` are computed by the paper
+    but not plotted.
+
+    `ms_before` is **3.0**, not the modern default of 1.0 — the paper never
+    overrode SI 0.97.1's default, and its vendored
+    `waveforms/params.json` confirms it. At the modern default the template
+    window is half as long and the features differ silently.
 
     Error is `|metric_lossy - metric_reference| / |metric_reference|`,
     where the reference template comes from the **uncompressed** recording.

@@ -1,5 +1,13 @@
 loader: mearec
 params:
-  path: sourcedata/aind-ephys-compression/mearec/mearec_NP2.h5
+  path: results/dandi-t261-compression-study/sourcedata/aind-ephys-compression/mearec/mearec_NP2.h5
   start_s: 0.0
   duration_s: 100.0
+
+preprocessing:
+  # Paper table 1: lsb = 3. The sim driver applies spre.correct_lsb
+  # unconditionally (benchmark-lossy-sim.py:147); without it bit-truncation
+  # truncates bits that carry no information, so `bittrunc-N` would not be
+  # the paper's `bit_truncation-N`.
+  - kind: lsb_correction
+    lsb: 3
