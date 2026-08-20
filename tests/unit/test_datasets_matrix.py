@@ -149,3 +149,45 @@ def test_strict_key_and_shape_validation(mutate, match):
     mutate(m)
     with pytest.raises(ValueError, match=match):
         _profile(matrix=m)
+
+
+def test_skip_when_vars_drops_no_op_conditions(tmp_path):
+    """LSB correction on SpikeGLX data is a no-op (lsb=1), so generating that
+    condition would re-measure `raw` under a different name — a quarter of
+    the paper sweep."""
+    m = _matrix()
+    m["recordings"] = [
+        {"label": "spikeglx", "vars": {"lsb": 1}, "params": {"path": "a"}},
+        {"label": "openephys", "vars": {"lsb": 12}, "params": {"path": "b"}},
+    ]
+    m["preprocessing"] = [
+        {"label": "raw"},
+        {
+            "label": "lsb",
+            "skip_when_vars": {"lsb": 1},
+            "steps": [{"kind": "lsb_correction", "lsb": "${lsb}"}],
+        },
+    ]
+    names = {Path(p).stem for p in materialize_datasets_matrix(m, tmp_path)}
+    assert names == {"spikeglx-raw", "openephys-raw", "openephys-lsb"}
+
+
+def test_skip_when_vars_requires_all_listed_vars_to_match(tmp_path):
+    m = _matrix()
+    m["recordings"] = [{"label": "r", "vars": {"lsb": 1, "probe": "NP2"}, "params": {"path": "a"}}]
+    m["preprocessing"] = [
+        {"label": "a", "skip_when_vars": {"lsb": 1, "probe": "NP1"}, "steps": [{"kind": "x"}]},
+        {"label": "b", "skip_when_vars": {"lsb": 1, "probe": "NP2"}, "steps": [{"kind": "x"}]},
+    ]
+    names = {Path(p).stem for p in materialize_datasets_matrix(m, tmp_path)}
+    assert names == {"r-a"}  # only `b` matches every listed var
+
+
+def test_var_substitution_requires_the_var_to_exist():
+    m = _matrix()
+    m["recordings"] = [{"label": "r", "params": {"path": "a"}}]  # no vars
+    m["preprocessing"] = [{"label": "lsb", "steps": [{"kind": "lsb_correction", "lsb": "${lsb}"}]}]
+    import tempfile
+
+    with pytest.raises(ValueError, match=r"references \$\{lsb\}"):
+        materialize_datasets_matrix(m, tempfile.mkdtemp())

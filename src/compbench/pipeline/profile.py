@@ -257,7 +257,7 @@ def _chunk_label(chunk_duration_s: float | None) -> str:
 
 _MATRIX_KEYS = {"loader", "params", "recordings", "preprocessing"}
 _RECORDING_KEYS = {"label", "params", "vars"}
-_PREPROC_KEYS = {"label", "steps"}
+_PREPROC_KEYS = {"label", "steps", "skip_when_vars"}
 
 
 def _validate_datasets_matrix(matrix: Any, label: str) -> None:
@@ -330,6 +330,8 @@ def _validate_datasets_matrix(matrix: Any, label: str) -> None:
         steps = pre.get("steps")
         if steps is not None and not isinstance(steps, list):
             raise ValueError(f"{where}: preprocessing[{i}] `steps:` must be a list")
+        if not isinstance(pre.get("skip_when_vars", {}), dict):
+            raise ValueError(f"{where}: preprocessing[{i}] `skip_when_vars:` must be a mapping")
 
 
 _SAFE_CHAR = re.compile(r"[^a-zA-Z0-9._-]")
@@ -391,6 +393,14 @@ def materialize_datasets_matrix(matrix: dict[str, Any], out_dir: str | Path) -> 
         rec_params = dict(rec.get("params", {}))
         rec_vars = dict(rec.get("vars", {}))
         for pre in preprocs:
+            # A condition can be a no-op for some recordings — LSB correction
+            # on SpikeGLX data is the motivating case, since lsb=1 means
+            # `correct_lsb` does nothing. Generating those cells would burn a
+            # quarter of the paper sweep re-measuring the `raw` condition
+            # under a different name.
+            skip = pre.get("skip_when_vars") or {}
+            if skip and all(rec_vars.get(k) == v for k, v in skip.items()):
+                continue
             # Per-recording params win over the matrix-wide defaults.
             params = {**common, **rec_params}
             cfg: dict[str, Any] = {"loader": loader, "params": params}

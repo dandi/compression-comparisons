@@ -43,6 +43,18 @@
 meta:
   doi: 10.1088/1741-2552/acf5a4
   license: CC-BY-4.0
+  # WHICH CAPSULE VERSION the derived reference table came from. The Code
+  # Ocean capsule has two published versions and they correspond to two
+  # different manuscripts:
+  #   v1 — 2023-05-22 11:33 — the bioRxiv preprint
+  #   v2 — 2023-08-30 16:42 — the published J. Neural Eng. article
+  # Everything transcribed and derived here is from **v2**, matching the
+  # published article these numbers are quoted from. If v1 is later added
+  # to the vendored history, diff the two before assuming a number moved
+  # for any reason other than the revision.
+  capsule_version: v2
+  capsule_version_date: 2023-08-30T16:42
+  capsule_id: 3822095
   statistic: median_plus_minus_sd
   n_per_distribution: 8
   transcribed_utc: 2026-08-20

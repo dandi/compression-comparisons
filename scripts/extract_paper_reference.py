@@ -7,8 +7,14 @@ committed so the benchmark can diff against the paper without anyone
 needing the capsule.
 
     python scripts/extract_paper_reference.py \
-        --capsule src/capsule-ephys-compression-results/capsule-3822095.zip \
+        --capsule src/capsule-ephys-compression-results \
+        --capsule-version v2 \
         --output .specify/specs/paper-reference-lossless.csv
+
+The capsule has two published versions and they are different
+manuscripts: v1 (2023-05-22) is the bioRxiv preprint, v2 (2023-08-30) is
+the published J. Neural Eng. article. Pass the right one — a number that
+"moved" may simply be a revision.
 
 The aggregation deliberately mirrors `code/lossless.ipynb` rather than
 inventing our own: median and std over sessions, grouped by every
@@ -80,6 +86,12 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--capsule", type=Path, required=True, help="capsule .zip or unpacked dir")
     ap.add_argument("--output", type=Path, required=True)
+    ap.add_argument(
+        "--capsule-version",
+        default="v2",
+        help="Which published capsule version this data came from (default: v2, "
+        "the version matching the published J. Neural Eng. article).",
+    )
     args = ap.parse_args()
 
     table = build(load(args.capsule))
@@ -87,6 +99,9 @@ def main() -> None:
     args.output.write_text(
         "# Derived from the Code Ocean capsule data asset for Buccino et al. 2023\n"
         "# (doi:10.1088/1741-2552/acf5a4). Source data is CC0 1.0.\n"
+        f"# Capsule version: {args.capsule_version}. v2 (2023-08-30) is the\n"
+        "# published article; v1 (2023-05-22) is the bioRxiv preprint. These\n"
+        "# are different manuscripts, so the version matters.\n"
         "# Regenerate with scripts/extract_paper_reference.py — do not hand-edit.\n"
         "# Aggregation mirrors the capsule's code/lossless.ipynb: median/std over\n"
         "# sessions, with every filterable condition kept as a column.\n"

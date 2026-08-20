@@ -1,5 +1,8 @@
 # Derived from the Code Ocean capsule data asset for Buccino et al. 2023
 # (doi:10.1088/1741-2552/acf5a4). Source data is CC0 1.0.
+# Capsule version: v2. v2 (2023-08-30) is the
+# published article; v1 (2023-05-22) is the bioRxiv preprint. These
+# are different manuscripts, so the version matters.
 # Regenerate with scripts/extract_paper_reference.py — do not hand-edit.
 # Aggregation mirrors the capsule's code/lossless.ipynb: median/std over
 # sessions, with every filterable condition kept as a column.

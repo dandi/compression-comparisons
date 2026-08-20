@@ -92,9 +92,11 @@ datasets_matrix:
     # bucket actually gets) and are never discarded or superseded.
     #
     # `raw` + `bp`  : data exactly as the benchmark bucket ships it.
-    # `lsb` + `lsbbp`: the paper's measurement condition.
-    # For IBL recordings lsb=1, so `lsb` differs from `raw` only by the
-    # per-channel median removal the paper also applies.
+    # `lsb` + `lsbbp`: the paper's measurement condition, AIND only.
+    # IBL recordings have lsb=1, for which `correct_lsb` is documented to
+    # apply no operation, so those two conditions are skipped there rather
+    # than duplicating `raw`/`bp` under another name. For IBL, `raw` IS the
+    # paper's condition.
     - label: raw
     - label: bp
       steps:
@@ -103,10 +105,15 @@ datasets_matrix:
           high_hz: 6000
           order: 4
     - label: lsb
+      # Skipped for SpikeGLX recordings: lsb=1 makes `correct_lsb` a no-op,
+      # so this condition would be a byte-identical duplicate of `raw`.
+      # The paper's own driver marks ibl-np1 as {"none": False}.
+      skip_when_vars: {lsb: 1}
       steps:
         - kind: lsb_correction
           lsb: "${lsb}"
     - label: lsbbp
+      skip_when_vars: {lsb: 1}   # would duplicate `bp` — see above
       steps:
         - kind: lsb_correction
           lsb: "${lsb}"

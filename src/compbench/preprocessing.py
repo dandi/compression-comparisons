@@ -122,10 +122,17 @@ def _lsb_correction(
     centring would leave a fractional remainder that rounds
     inconsistently across channels.
 
-    ``lsb=1`` is the SpikeGLX case. It is NOT a no-op — the per-channel
-    median is still removed, matching what the paper does to every
-    dataset it marks LSB-corrected. Pass the recording's own LSB from
-    the paper's table 1 (IBL NP1: 1, AIND NP1: 12, AIND NP2: 3).
+    ``lsb=1`` is a NO-OP, matching ``spikeinterface.preprocessing.correct_lsb``
+    ("Estimated LSB=1. No operation is applied"). This is not a detail:
+    the paper's own driver marks IBL as ``{"none": False}`` — *"spikeGLX
+    is already LSB-corrected"* — and passes the untouched recording to the
+    compressor. Removing the median anyway is a preprocessing step the
+    paper never applied, and on CSHZAD026 it inflates blosc-zstd CR by
+    over 20%, i.e. enough to fake a failed reproduction.
+
+    Pass the recording's own LSB from the paper's table 1 (IBL NP1: 1,
+    AIND NP1: 12, AIND NP2: 3); an IBL recording therefore needs no
+    ``lsb`` condition at all.
 
     This is an added condition, never a correction applied in place —
     see plan §6 decision 6. Uncorrected AIND numbers stand on their own.
@@ -133,6 +140,9 @@ def _lsb_correction(
     lsb_i = int(lsb)
     if lsb_i < 1:
         raise ValueError(f"lsb must be a positive integer; got {lsb_i}")
+    if lsb_i == 1:
+        # Matches spikeinterface.preprocessing.correct_lsb. See docstring.
+        return data
 
     flat = data[:, None] if data.ndim == 1 else data
     n_samples, n_channels = flat.shape
@@ -151,8 +161,7 @@ def _lsb_correction(
         c1 = min(c0 + cols_per_block, n_channels)
         block = flat[:, c0:c1].astype(np.float64)
         block -= np.median(block, axis=0, keepdims=True)
-        if lsb_i != 1:
-            block /= lsb_i
+        block /= lsb_i
         if is_int:
             np.round(block, out=block)
         out[:, c0:c1] = block.astype(original_dtype)

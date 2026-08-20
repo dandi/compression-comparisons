@@ -52,13 +52,21 @@ def test_recovers_the_underlying_median_centred_signal(lsb):
         np.testing.assert_array_equal(got[:, c], expected)
 
 
-def test_lsb_one_still_removes_the_median():
-    """SpikeGLX case. Not a no-op — the paper centres every corrected dataset."""
+def test_lsb_one_is_a_no_op():
+    """SpikeGLX case.
+
+    `spikeinterface.preprocessing.correct_lsb` warns "Estimated LSB=1. No
+    operation is applied" and returns the recording untouched, and the
+    paper's driver marks IBL as `{"none": False}` — the untouched
+    recording goes to the compressor. Removing the median anyway is a step
+    the paper never applied; on CSHZAD026 it inflates blosc-zstd CR by
+    >20%, which is enough to look like a failed reproduction.
+    """
     rng = np.random.default_rng(1)
     data = (rng.normal(0, 50, size=(2000, 4)) + 800).round().astype(np.int16)
     got = apply(data, 30000.0, _steps(lsb=1))
-    assert abs(float(np.median(got[:, 0]))) <= 1
-    assert abs(float(np.median(data[:, 0]))) > 700
+    np.testing.assert_array_equal(got, data)
+    assert abs(float(np.median(got[:, 0]))) > 700  # offset deliberately preserved
 
 
 def test_it_actually_improves_compression():
