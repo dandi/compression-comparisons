@@ -22,17 +22,37 @@ from compbench.codecs.base import CodecAdapter
 _SHUFFLE_CHOICES = ("no", "byte")
 
 
+def _norm_shuffle(shuffle: str | bool) -> str:
+    """Normalise a shuffle value, tolerating YAML's boolean coercion.
+
+    `shuffle: no` in a YAML file is a YAML 1.1 BOOLEAN, so PyYAML yields
+    Python `False`, not `"no"`. Unquoted, that silently broke 13.6% of the
+    paper profiles' cells — including the paper's best NP1 general-purpose
+    config (lzma high, no shuffle). Profiles now quote it; this accepts the
+    boolean too so the trap cannot reopen, and normalises BEFORE the value
+    reaches `params`, so a manifest never records `shuffle: False`.
+    """
+    if shuffle is False:
+        return "no"
+    if shuffle is True:
+        raise ValueError(
+            'shuffle: yes is not a shuffle mode — did you mean "byte"? '
+            "(bare yes/no in YAML are booleans; quote the value)"
+        )
+    if shuffle not in _SHUFFLE_CHOICES:
+        raise ValueError(
+            f"shuffle must be one of {list(_SHUFFLE_CHOICES)}; got {shuffle!r}. "
+            f"(blosc codecs additionally accept 'bit' — that is blosc's own "
+            f"internal shuffle, a different mechanism.)"
+        )
+    return shuffle
+
+
 class _ShuffleMixin(CodecAdapter):
     """Adds the paper's `(no, byte)` Zarr-filter shuffle axis."""
 
-    def _init_shuffle(self, shuffle: str, elementsize: int = 2) -> None:
-        if shuffle not in _SHUFFLE_CHOICES:
-            raise ValueError(
-                f"shuffle must be one of {list(_SHUFFLE_CHOICES)}; got {shuffle!r}. "
-                f"(blosc codecs additionally accept 'bit' — that is blosc's own "
-                f"internal shuffle, a different mechanism.)"
-            )
-        self._shuffle = shuffle
+    def _init_shuffle(self, shuffle: str | bool, elementsize: int = 2) -> None:
+        self._shuffle = _norm_shuffle(shuffle)
         self._elementsize = int(elementsize)
 
     def make_filters(self) -> list[Codec]:
@@ -49,8 +69,8 @@ class GZipAdapter(_ShuffleMixin):
     name: ClassVar[str] = "gzip"
     lossy: ClassVar[bool] = False
 
-    def __init__(self, level: int | str = 5, shuffle: str = "no", delta: str = "no") -> None:
-        super().__init__(level=int(level), shuffle=shuffle, delta=delta)
+    def __init__(self, level: int | str = 5, shuffle: str | bool = "no", delta: str = "no") -> None:
+        super().__init__(level=int(level), shuffle=_norm_shuffle(shuffle), delta=delta)
         self._level = int(level)
         self._init_shuffle(shuffle)
 
@@ -65,8 +85,8 @@ class ZlibAdapter(_ShuffleMixin):
     name: ClassVar[str] = "zlib"
     lossy: ClassVar[bool] = False
 
-    def __init__(self, level: int | str = 5, shuffle: str = "no", delta: str = "no") -> None:
-        super().__init__(level=int(level), shuffle=shuffle, delta=delta)
+    def __init__(self, level: int | str = 5, shuffle: str | bool = "no", delta: str = "no") -> None:
+        super().__init__(level=int(level), shuffle=_norm_shuffle(shuffle), delta=delta)
         self._level = int(level)
         self._init_shuffle(shuffle)
 
@@ -81,8 +101,12 @@ class LZ4Adapter(_ShuffleMixin):
     name: ClassVar[str] = "lz4"
     lossy: ClassVar[bool] = False
 
-    def __init__(self, acceleration: int | str = 1, shuffle: str = "no", delta: str = "no") -> None:
-        super().__init__(acceleration=int(acceleration), shuffle=shuffle, delta=delta)
+    def __init__(
+        self, acceleration: int | str = 1, shuffle: str | bool = "no", delta: str = "no"
+    ) -> None:
+        super().__init__(
+            acceleration=int(acceleration), shuffle=_norm_shuffle(shuffle), delta=delta
+        )
         self._acceleration = int(acceleration)
         self._init_shuffle(shuffle)
 
@@ -97,8 +121,8 @@ class ZstdAdapter(_ShuffleMixin):
     name: ClassVar[str] = "zstd"
     lossy: ClassVar[bool] = False
 
-    def __init__(self, level: int | str = 3, shuffle: str = "no", delta: str = "no") -> None:
-        super().__init__(level=int(level), shuffle=shuffle, delta=delta)
+    def __init__(self, level: int | str = 3, shuffle: str | bool = "no", delta: str = "no") -> None:
+        super().__init__(level=int(level), shuffle=_norm_shuffle(shuffle), delta=delta)
         self._level = int(level)
         self._init_shuffle(shuffle)
 
@@ -113,8 +137,10 @@ class LZMAAdapter(_ShuffleMixin):
     name: ClassVar[str] = "lzma"
     lossy: ClassVar[bool] = False
 
-    def __init__(self, preset: int | str = 6, shuffle: str = "no", delta: str = "no") -> None:
-        super().__init__(preset=int(preset), shuffle=shuffle, delta=delta)
+    def __init__(
+        self, preset: int | str = 6, shuffle: str | bool = "no", delta: str = "no"
+    ) -> None:
+        super().__init__(preset=int(preset), shuffle=_norm_shuffle(shuffle), delta=delta)
         self._preset = int(preset)
         self._init_shuffle(shuffle)
 

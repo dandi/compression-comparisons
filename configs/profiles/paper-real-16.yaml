@@ -152,15 +152,15 @@ codecs:
   # Previously swept `no` only, which made 5 of 9 general-purpose codecs
   # half-conditioned and put the paper's headline NP2 LZMA cell (byte,
   # CR 1.91) out of reach entirely.
-  - {codec: gzip,        params: {level: 9, shuffle: no}}
+  - {codec: gzip,        params: {level: 9, shuffle: "no"}}
   - {codec: gzip,        params: {level: 9, shuffle: byte}}
-  - {codec: zlib,        params: {level: 9, shuffle: no}}
+  - {codec: zlib,        params: {level: 9, shuffle: "no"}}
   - {codec: zlib,        params: {level: 9, shuffle: byte}}
-  - {codec: lz4,         params: {acceleration: 1, shuffle: no}}    # `high`, inverted
+  - {codec: lz4,         params: {acceleration: 1, shuffle: "no"}}    # `high`, inverted
   - {codec: lz4,         params: {acceleration: 1, shuffle: byte}}
-  - {codec: zstd,        params: {level: 22, shuffle: no}}
+  - {codec: zstd,        params: {level: 22, shuffle: "no"}}
   - {codec: zstd,        params: {level: 22, shuffle: byte}}
-  - {codec: lzma,        params: {preset: 9, shuffle: no}}          # paper's best NP1
+  - {codec: lzma,        params: {preset: 9, shuffle: "no"}}          # paper's best NP1
   - {codec: lzma,        params: {preset: 9, shuffle: byte}}        # paper's best NP2
 
   # --- audio codecs: the paper's winners ---------------------------------
@@ -196,7 +196,11 @@ codecs:
   - {codec: blosc-zstd, chunk_durations_s: [1.0], params: {level: 9, shuffle: bit, delta: 2d-time}}
   - {codec: blosc-zstd, chunk_durations_s: [1.0], params: {level: 9, shuffle: bit, delta: 2d-space}}
   - {codec: blosc-zstd, chunk_durations_s: [1.0], params: {level: 9, shuffle: bit, delta: 2d-time-space}}
-  - {codec: lzma, chunk_durations_s: [1.0], params: {preset: 9, shuffle: no, delta: 2d-time}}
+  # The paper's delta driver pins numcodecs codecs to BYTE shuffle
+  # (benchmark-lossless-delta.py: shuffles["numcodecs"] = {"byte": ...}).
+  # All 64 lzma rows in benchmark-lossless-delta.csv are high+byte; the
+  # `no` variant has no counterpart there and reads +18% against nothing.
+  - {codec: lzma, chunk_durations_s: [1.0], params: {preset: 9, shuffle: "byte", delta: 2d-time}}
   - {codec: flac, chunk_durations_s: [1.0], params: {level: 5, delta: 2d-time}}
   - {codec: wavpack, chunk_durations_s: [1.0], params: {level: 2, delta: 2d-time}}
 
