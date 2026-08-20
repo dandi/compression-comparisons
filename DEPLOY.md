@@ -54,24 +54,55 @@ one-command intent is documented).
 
 ### 1a. Current: sync from Yaroslav's dev machine
 
+**Two independent clones needed** — the tool repo AND the study repo. The
+study lists the tool repo as a subdataset; on the target machine you
+re-point that URL at the local tool clone.
+
 ```bash
-# On the dev machine (study at ~/proj/dandi/compression-comparisons/results/dandi-t261-compression-study):
-tar czf /tmp/study.tar.gz -C ~/proj/dandi/compression-comparisons/results dandi-t261-compression-study
+# Clone both from your source (dev machine, GitHub eventually, etc.).
+# Since the tool repo has its OWN submodule (src/bwc → HHI GitLab, HTTPS),
+# --recursive is safe on it directly.
+git clone --recursive <source>/compression-comparisons
+git clone <source>/dandi-t261-compression-study
 
-# On the target machine:
-scp yaroslav@dev:/tmp/study.tar.gz . && tar xzf study.tar.gz && cd dandi-t261-compression-study
+# --- Tool repo setup ---
+cd compression-comparisons
+# src/bwc came in via --recursive above. If you got the tool clone WITHOUT
+# --recursive, run:
+#   git submodule update --init --recursive          # HTTPS, no flag needed
 
-# The tool-code submodule currently points at a local absolute path — fix
-# to the GitHub URL (when the tool repo is pushed) or another host you have:
-git -c protocol.file.allow=always submodule sync
-git config submodule.code/compression-comparisons-tools.url https://github.com/dandi/compression-comparisons
-datalad get -r code/compression-comparisons-tools
+# --- Study repo setup ---
+cd ../dandi-t261-compression-study
 
-# sourcedata subdataset points at ///aind-benchmark-data/ephys-compression (public):
+# The tool-code submodule's URL in .gitmodules is Yaroslav's absolute path
+# (`/home/yoh/proj/dandi/compression-comparisons`). Repoint it at YOUR
+# tool clone BEFORE initialising:
+git config submodule.code/compression-comparisons-tools.url $PWD/../compression-comparisons
+
+# Init both submodules. The tool-code one is a local path (file: transport),
+# blocked by default since git 2.38.1 (CVE-2022-39253). Two options:
+#
+#   (A) One-shot allow — narrow blast radius, recommended:
+git -c protocol.file.allow=always submodule update --init --recursive
+#
+#   (B) Persistent per-user opt-in (only allows file: for URLs YOU set via
+#       `git config`, NOT for URLs coming from an untrusted .gitmodules):
+#     git config --global protocol.file.allow user
+#     git submodule update --init --recursive
+#
+# DO NOT `git config --global protocol.file.allow always` — that turns off
+# the CVE-2022-39253 protection everywhere.
+
+# The sourcedata subdataset uses HTTPS (///aind-benchmark-data/ephys-compression)
+# so the file: restriction never applies to it. `datalad get` handles all
+# this transparently and is the DataLad-idiomatic form:
 datalad get sourcedata/aind-ephys-compression   # registers; files still annexed
 datalad -C sourcedata/aind-ephys-compression get \
     ibl-np1/CSHZAD026_2020-09-04_probe00/traces_cached_seg0.raw   # ~28 GB, one recording
 ```
+
+**If you see `fatal: transport 'file' not allowed`**, you hit CVE-2022-39253
+hardening on the tool-code submodule's `file:` URL. Use option (A) above.
 
 ### 1b. Future canonical (once the study is pushed)
 
