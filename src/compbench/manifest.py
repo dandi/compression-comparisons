@@ -19,6 +19,8 @@ import numpy as np
 
 from compbench import __version__ as compbench_version
 
+_DIGEST_CHUNK_BYTES = 64 * 1024 * 1024
+
 
 def input_digest(data: bytes) -> str:
     """SHA-256 hex digest of arbitrary bytes."""
@@ -37,7 +39,16 @@ def array_digest(arr: np.ndarray) -> str:
     """
     h = hashlib.sha256()
     h.update(f"shape={tuple(arr.shape)}|dtype={arr.dtype.str}|".encode())
-    h.update(np.ascontiguousarray(arr).tobytes())
+    # Feed the hash in slices rather than via one `tobytes()`. `tobytes()`
+    # copies the entire array into a fresh bytes object — a second 27 GB
+    # allocation on the paper's full-length recordings, for a digest we
+    # could just as well stream (plan §Phase 3.5 [R5-H2]).
+    contiguous = np.ascontiguousarray(arr)
+    flat = contiguous.reshape(-1)
+    itemsize = max(int(flat.dtype.itemsize), 1)
+    step = max(1, _DIGEST_CHUNK_BYTES // itemsize)
+    for start in range(0, flat.size, step):
+        h.update(flat[start : start + step].tobytes())
     return h.hexdigest()
 
 

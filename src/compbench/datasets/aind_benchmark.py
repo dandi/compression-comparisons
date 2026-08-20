@@ -55,6 +55,50 @@ def _load_recording(folder: Path) -> Any:
     )
 
 
+def _git(args: list[str], cwd: Path) -> str | None:
+    """Run a git command, returning stripped stdout or None on any failure.
+
+    Provenance capture must never break a benchmark run: an unavailable
+    git, a non-annex checkout, or a plain-file copy of the data all fall
+    through to None and simply leave the field unset.
+    """
+    import subprocess
+
+    try:
+        out = subprocess.check_output(
+            args, cwd=cwd, stderr=subprocess.DEVNULL, text=True, timeout=30
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    return out.strip() or None
+
+
+def _source_provenance(folder: Path, traces_files: list[str]) -> dict[str, Any]:
+    """git-annex key + containing-dataset commit for the recording's traces.
+
+    A filesystem path alone does not identify *which version* of a recording
+    produced a number: the same path can hold different content across
+    machines, and `datalad get`/`drop` cycles leave no trace in the path.
+    The annex key is a content hash, so two runs at different data versions
+    are distinguishable from `manifest.json` alone (plan §Phase 3.5 [R2-H2]).
+
+    Everything here is best-effort — see `_git`.
+    """
+    prov: dict[str, Any] = {}
+    if traces_files:
+        first = Path(traces_files[0])
+        key = _git(["git", "annex", "lookupkey", first.name], cwd=first.parent)
+        if key:
+            prov["annex_key"] = key
+    commit = _git(["git", "rev-parse", "HEAD"], cwd=folder)
+    if commit:
+        prov["dataset_commit"] = commit
+    toplevel = _git(["git", "rev-parse", "--show-toplevel"], cwd=folder)
+    if toplevel:
+        prov["dataset_root"] = toplevel
+    return prov
+
+
 @register("aind-benchmark")
 def load_aind_benchmark(
     path: str | Path,
@@ -77,6 +121,10 @@ def load_aind_benchmark(
 
     rec = _load_recording(folder)
     fs = float(rec.get_sampling_frequency())
+    traces_files = [
+        str(folder / fp)
+        for fp in json.loads((folder / "binary.json").read_text())["kwargs"]["file_paths"]
+    ]
     start = float(start_s)
     dur = None if duration_s in (None, "None", "") else float(duration_s)
 
@@ -107,6 +155,7 @@ def load_aind_benchmark(
                     else list(map(int, str(channel_indices).split(",")))
                 ),
             },
+            "source": _source_provenance(folder, traces_files),
             "spikeinterface": {
                 "n_channels_total": int(rec.get_num_channels()),
                 "sampling_frequency_hz": fs,

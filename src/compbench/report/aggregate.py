@@ -65,6 +65,32 @@ def load_duct_info(path: Path) -> dict[str, Any]:
     }
 
 
+def _preprocessing_summary(manifest: dict[str, Any]) -> str:
+    """One-line rendering of the preprocessing chain, e.g. `bandpass(300-6000Hz,o4)`.
+
+    Returns "raw" when no preprocessing was applied, so the column is never
+    null and `df.groupby("preprocessing_summary")` always partitions cleanly.
+    """
+    steps = manifest.get("input", {}).get("provenance", {}).get("preprocessing") or []
+    if not steps:
+        return "raw"
+    parts: list[str] = []
+    for step in steps:
+        if not isinstance(step, dict):
+            parts.append(str(step))
+            continue
+        kind = step.get("kind", "?")
+        if kind == "bandpass":
+            parts.append(
+                f"bandpass({step.get('low_hz', '?')}-{step.get('high_hz', '?')}Hz"
+                f",o{step.get('order', '?')})"
+            )
+        else:
+            args = ",".join(f"{k}={v}" for k, v in step.items() if k != "kind")
+            parts.append(f"{kind}({args})" if args else str(kind))
+    return "+".join(parts)
+
+
 def load_cell(cell_dir: Path) -> dict[str, Any] | None:
     """Assemble one row from a directory containing at least `metrics.json`.
 
@@ -94,6 +120,22 @@ def load_cell(cell_dir: Path) -> dict[str, Any] | None:
         "input_n_channels": manifest.get("input", {}).get("n_channels"),
         "input_dtype": manifest.get("input", {}).get("dtype"),
         "input_sha256": manifest.get("input", {}).get("sha256"),
+        # Raw vs band-pass is the difference between reproducing the paper's
+        # Fig 2 and its Fig 7. Without this column a reader has to open each
+        # cell's manifest.json to tell them apart (plan §Phase 3.5 [R2-H3]).
+        "preprocessing_summary": _preprocessing_summary(manifest),
+        "dataset_loader": manifest.get("input", {}).get("provenance", {}).get("loader"),
+        "dataset_yaml_source": manifest.get("input", {}).get("provenance", {}).get("yaml_source"),
+        # git-annex key of the source recording — distinguishes two runs
+        # against the same path at different data versions ([R2-H2]).
+        "input_annex_key": manifest.get("input", {})
+        .get("provenance", {})
+        .get("source", {})
+        .get("annex_key"),
+        "input_dataset_commit": manifest.get("input", {})
+        .get("provenance", {})
+        .get("source", {})
+        .get("dataset_commit"),
         "compbench_version": manifest.get("compbench_version"),
         "git_sha": manifest.get("git_sha"),
         "created_utc": manifest.get("created_utc"),

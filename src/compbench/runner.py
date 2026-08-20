@@ -84,13 +84,20 @@ def run_cell(
     encoded, enc_dt = encode(ds, adapter)
     reconstructed, dec_dt = decode(encoded, adapter, template=ds.data)
 
-    cr = metrics.compression_ratio(ds.nbytes, len(encoded))
+    encoded_bytes = len(encoded)
+    cr = metrics.compression_ratio(ds.nbytes, encoded_bytes)
+    if not keep_reconstructed:
+        # The encoded buffer is dead once its length is recorded, but it is
+        # the compressed image of a 27 GB input — several GB that would
+        # otherwise sit alongside the metric pass (plan §Phase 3.5 [R5-H2]).
+        del encoded
+        encoded = b""
     exact = metrics.round_trip_ok(ds.data, reconstructed)
 
-    # Precompute the float64 promotions once and pass to every metric.
-    # Before this consolidation each metric independently promoted `ds.data`
-    # to float64 → 4-5x redundant allocation per cell (~1 GB on 230 MB int16
-    # input). Now: two arrays, shared across all metrics.
+    # Every distortion statistic comes from one bounded-memory pass. The
+    # previous approach promoted both arrays to float64 up front, which at
+    # the paper's 1200 s recordings is 220 GB of float64 before filtfilt's
+    # own temporaries — see `metrics.distortion_summary`.
     if exact:
         # Lossless round-trip → every distortion metric is analytically zero;
         # skip the multi-second filtfilt / dot-product ceremony. This alone
@@ -99,30 +106,26 @@ def run_cell(
         prd_val = 0.0
         prdn_val = 0.0
         band_rmse: float | None = 0.0 if ds.sample_rate_hz > 12000.0 else None
-        signal_std = float(np.std(ds.data.astype(np.float64))) if ds.data.size else 0.0
+        signal_std = metrics.signal_std(ds.data)
+        prdn_median: float | None = 0.0
+        prdn_iqr: float | None = 0.0
+        prdn_max: float | None = 0.0
     else:
-        orig64 = ds.data.astype(np.float64)
-        recon64 = reconstructed.astype(np.float64)
-        err = metrics.rmse(orig64, recon64)
-        prd_val = metrics.prd(orig64, recon64)
-        prdn_val = metrics.prdn(orig64, recon64)
-        signal_std = float(np.std(orig64)) if orig64.size else 0.0
-        # Band-limited RMSE (Buccino Fig 4-6 methodology). Nyquist gate:
-        # need sample_rate > 2 * high_hz to bandpass at 300-6000 Hz.
-        band_rmse = None
-        if ds.sample_rate_hz > 12000.0:
-            try:
-                band_rmse = metrics.rmse_band_limited(
-                    orig64, recon64, ds.sample_rate_hz, 300.0, 6000.0
-                )
-            except ValueError:
-                band_rmse = None
+        dist = metrics.distortion_summary(ds.data, reconstructed, ds.sample_rate_hz, 300.0, 6000.0)
+        err = dist["rmse"]
+        prd_val = dist["prd_percent"]
+        prdn_val = dist["prdn_percent"]
+        signal_std = dist["signal_std"]
+        band_rmse = dist["rmse_band_limited"]
+        prdn_median = dist["prdn_per_channel_median_percent"]
+        prdn_iqr = dist["prdn_per_channel_iqr_percent"]
+        prdn_max = dist["prdn_per_channel_max_percent"]
 
     duration = ds.duration_s
     result_metrics = {
         "cr": cr,
         "original_bytes": ds.nbytes,
-        "encoded_bytes": len(encoded),
+        "encoded_bytes": encoded_bytes,
         "encode_time_s": enc_dt,
         "decode_time_s": dec_dt,
         "encode_xrt": (duration / enc_dt) if enc_dt > 0 else None,
@@ -131,6 +134,13 @@ def run_cell(
         "rmse_band_limited_300_6000": band_rmse,
         "prd_percent": prd_val,
         "prdn_percent": prdn_val,
+        # Pooled PRDN normalises by the std across *all* channels, which on a
+        # 384-channel probe is dominated by the loudest ones and understates
+        # what a typical channel sees. The per-channel median is the
+        # reader-facing number (plan §Phase 3.5 [R1-H2]).
+        "prdn_per_channel_median_percent": prdn_median,
+        "prdn_per_channel_iqr_percent": prdn_iqr,
+        "prdn_per_channel_max_percent": prdn_max,
         "signal_std": signal_std,
         "rmse_over_signal_std_percent": (100.0 * err / signal_std) if signal_std > 0 else 0.0,
         "round_trip_ok": exact,
