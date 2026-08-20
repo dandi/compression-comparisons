@@ -126,6 +126,11 @@ rule run_cell:
         input_q = lambda w: shlex.quote(CELL_BY_ID[w.cell_id].dataset_spec),
         codec_q = lambda w: shlex.quote(CELL_BY_ID[w.cell_id].codec),
         params_q = lambda w: shlex.quote(CELL_BY_ID[w.cell_id].codec_params_cli),
+        chunk_arg = lambda w: (
+            ""
+            if CELL_BY_ID[w.cell_id].chunk_duration_s is None
+            else f"--chunk-duration-s {shlex.quote(str(CELL_BY_ID[w.cell_id].chunk_duration_s))}"
+        ),
     threads: 1
     resources:
         mem_mb = 4096,
@@ -142,6 +147,7 @@ rule run_cell:
                 --input {params.input_q} \
                 --codec {params.codec_q} \
                 --codec-params {params.params_q} \
+                {params.chunk_arg} \
                 --output-dir {params.cell_dir_q}
         """
 

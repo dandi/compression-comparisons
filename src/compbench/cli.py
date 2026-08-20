@@ -80,6 +80,18 @@ def describe_codec(name: str) -> None:
     help="Output directory; will be created if missing.",
 )
 @click.option(
+    "--chunk-duration-s",
+    "chunk_duration_s",
+    default=None,
+    type=float,
+    help=(
+        "Compress in chunks of this many seconds instead of one whole-buffer "
+        "chunk. Buccino et al.'s headline figures are all at 1 s; a whole-buffer "
+        "chunk gives the codec more context and a better ratio, so the two are "
+        "not comparable."
+    ),
+)
+@click.option(
     "--fail-on-lossless-mismatch/--no-fail-on-lossless-mismatch",
     default=True,
     help="Exit non-zero if the codec is declared lossless but round-trip is not byte-exact.",
@@ -89,6 +101,7 @@ def run(
     codec_name: str,
     codec_params: str,
     output_dir: str,
+    chunk_duration_s: float | None,
     fail_on_lossless_mismatch: bool,
 ) -> None:
     """Encode + decode + eval one input with one codec configuration."""
@@ -99,6 +112,7 @@ def run(
         spec=input_spec,
         codec_name=codec_name,
         codec_params=_parse_codec_params(codec_params),
+        chunk_duration_s=chunk_duration_s,
     )
 
     (out / "manifest.json").write_text(json.dumps(result.manifest, indent=2, sort_keys=True))

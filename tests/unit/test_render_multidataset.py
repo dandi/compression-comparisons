@@ -38,7 +38,7 @@ def test_multi_dataset_sweep_reports_median_min_max_and_n():
     body = render_markdown(rows)
     assert "Median CR across 3 datasets" in body
     # median 4.000, min 3.000, max 5.000, n 3
-    assert "| raw | lzma | lzma-preset_6 | 4.000 | 3.000 | 5.000 | 3 |" in body
+    assert "| raw @ whole | lzma | lzma-preset_6 | 4.000 | 3.000 | 5.000 | 3 |" in body
 
 
 def test_median_is_computed_per_preprocessing_variant():
@@ -50,8 +50,8 @@ def test_median_is_computed_per_preprocessing_variant():
         _row("recB", "lzma", "preset_6", 9.0, preproc="bandpass(300-6000Hz,o4)"),
     ]
     body = render_markdown(rows)
-    assert "| raw | lzma | lzma-preset_6 | 3.000 |" in body
-    assert "| bandpass(300-6000Hz,o4) | lzma | lzma-preset_6 | 9.000 |" in body
+    assert "| raw @ whole | lzma | lzma-preset_6 | 3.000 |" in body
+    assert "| bandpass(300-6000Hz,o4) @ whole | lzma | lzma-preset_6 | 9.000 |" in body
 
 
 def test_short_n_is_visible_when_cells_are_missing():
@@ -62,14 +62,14 @@ def test_short_n_is_visible_when_cells_are_missing():
         _row("recA", "t261", "qp1.5", 8.0),
     ]
     body = render_markdown(rows)
-    assert "| raw | t261 | t261-qp1.5 | 8.000 | 8.000 | 8.000 | 1 |" in body
+    assert "| raw @ whole | t261 | t261-qp1.5 | 8.000 | 8.000 | 8.000 | 1 |" in body
 
 
 def test_main_table_carries_dataset_and_preprocessing():
     body = render_markdown(
         [_row("ibl-CSHZAD026-bp", "lzma", "preset_6", 3.0, preproc="bandpass(300-6000Hz,o4)")]
     )
-    assert "| dataset | preproc | codec |" in body
+    assert "| dataset | preproc | chunk | codec |" in body
     assert "ibl-CSHZAD026-bp" in body
     assert "bandpass(300-6000Hz,o4)" in body
 
@@ -111,3 +111,39 @@ def test_output_is_stable_across_repeated_renders():
         _row("recB", "lzma", "preset_6", 3.3),
     ]
     assert render_markdown(rows) == render_markdown(list(reversed(rows)))
+
+
+def test_chunking_partitions_the_median_section():
+    """A whole-buffer CR and a 1 s CR are different conditions and must never
+    be pooled into one median — see plan §4.6b(b)."""
+    rows = [
+        _row("recA", "lzma", "preset_6", 9.0, metric_chunk_duration_s=None),
+        _row("recB", "lzma", "preset_6", 9.0, metric_chunk_duration_s=None),
+        _row("recA", "lzma", "preset_6", 3.0, metric_chunk_duration_s=1.0),
+        _row("recB", "lzma", "preset_6", 3.0, metric_chunk_duration_s=1.0),
+    ]
+    body = render_markdown(rows)
+    assert "| raw @ whole | lzma | lzma-preset_6 | 9.000 |" in body
+    assert "| raw @ 1s | lzma | lzma-preset_6 | 3.000 |" in body
+
+
+def test_whole_buffer_is_labelled_not_blank():
+    """A blank would read as 'not applicable' rather than 'not comparable'."""
+    body = render_markdown([_row("recA", "lzma", "preset_6", 3.0)])
+    assert "whole" in body
+
+
+def test_lsb_correction_appears_in_the_preprocessing_label():
+    from compbench.report.aggregate import _preprocessing_summary
+
+    m = {
+        "input": {
+            "provenance": {
+                "preprocessing": [
+                    {"kind": "lsb_correction", "lsb": 12},
+                    {"kind": "bandpass", "low_hz": 300, "high_hz": 6000, "order": 4},
+                ]
+            }
+        }
+    }
+    assert _preprocessing_summary(m) == "lsb12+bandpass(300-6000Hz,o4)"

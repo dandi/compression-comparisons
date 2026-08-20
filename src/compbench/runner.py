@@ -22,7 +22,7 @@ class CellResult:
     manifest: dict[str, Any]
     metrics: dict[str, Any]
     reconstructed: np.ndarray | None = None
-    encoded: bytes | None = None
+    encoded: list[bytes] | None = None
 
 
 def _resolve_codec(name: str, params: dict[str, Any]) -> CodecAdapter:
@@ -30,27 +30,70 @@ def _resolve_codec(name: str, params: dict[str, Any]) -> CodecAdapter:
     return cls(**params)
 
 
-def encode(dataset: LoadedDataset, adapter: CodecAdapter) -> tuple[bytes, float]:
-    """Return (encoded bytes, wall-clock encode time in seconds)."""
+def chunk_bounds(n_samples: int, chunk_samples: int | None) -> list[tuple[int, int]]:
+    """Half-open [start, stop) row ranges for one cell's chunking.
+
+    ``None`` (or a chunk at least as long as the recording) means a single
+    chunk spanning everything — the historical behaviour.
+    """
+    if chunk_samples is None or chunk_samples <= 0 or chunk_samples >= n_samples:
+        return [(0, n_samples)]
+    return [(s, min(s + chunk_samples, n_samples)) for s in range(0, n_samples, chunk_samples)]
+
+
+def encode(
+    dataset: LoadedDataset,
+    adapter: CodecAdapter,
+    chunk_samples: int | None = None,
+) -> tuple[list[bytes], float]:
+    """Return (per-chunk encoded buffers, wall-clock encode time in seconds).
+
+    Chunking matters for comparability, not just for streaming: Buccino et
+    al. compress through a Zarr store whose chunks are
+    (chunk_samples, n_channels), and every headline figure is at a 1 s
+    chunk (plan §4.6b(b)). Compressing a whole 60 s buffer in one shot
+    gives a codec far more context and a correspondingly better ratio, so
+    the two conditions are not comparable.
+
+    Returns a list even in the single-chunk case so callers have one shape
+    to handle; CR is then `original_bytes / sum(map(len, buffers))`.
+    """
     codec = adapter.make_codec()
+    data = dataset.data
+    bounds = chunk_bounds(data.shape[0], chunk_samples)
     t0 = time.perf_counter()
-    encoded = codec.encode(dataset.data)
+    out = [bytes(codec.encode(np.ascontiguousarray(data[a:b]))) for a, b in bounds]
     dt = time.perf_counter() - t0
-    return bytes(encoded), dt
+    return out, dt
 
 
-def decode(encoded: bytes, adapter: CodecAdapter, template: np.ndarray) -> tuple[np.ndarray, float]:
-    """Decode into a numpy array with `template`'s dtype and shape.
+def decode(
+    encoded: list[bytes],
+    adapter: CodecAdapter,
+    template: np.ndarray,
+    chunk_samples: int | None = None,
+) -> tuple[np.ndarray, float]:
+    """Decode per-chunk buffers back into one array shaped like `template`.
 
     numcodecs codecs return raw bytes-like data with no shape/dtype metadata.
     We use the template to reinterpret. `tobytes()` avoids alignment issues
     that `.view(dtype)` can trip on when the codec returns a uint8 array.
     """
     codec = adapter.make_codec()
+    bounds = chunk_bounds(template.shape[0], chunk_samples)
+    if len(bounds) != len(encoded):
+        raise ValueError(
+            f"chunk count mismatch: {len(encoded)} encoded buffer(s) but "
+            f"{len(bounds)} chunk bound(s) — encode/decode disagree on chunking"
+        )
+    n_cols = template.shape[1] if template.ndim > 1 else 1
+    out = np.empty(template.shape, dtype=template.dtype)
+    flat = out[:, None] if out.ndim == 1 else out
     t0 = time.perf_counter()
-    raw = codec.decode(encoded)
-    raw_bytes = raw.tobytes() if isinstance(raw, np.ndarray) else bytes(raw)
-    out = np.frombuffer(raw_bytes, dtype=template.dtype).reshape(template.shape)
+    for buf, (a, b) in zip(encoded, bounds, strict=True):
+        raw = codec.decode(buf)
+        raw_bytes = raw.tobytes() if isinstance(raw, np.ndarray) else bytes(raw)
+        flat[a:b] = np.frombuffer(raw_bytes, dtype=template.dtype).reshape(b - a, n_cols)
     dt = time.perf_counter() - t0
     return out, dt
 
@@ -60,6 +103,7 @@ def run_cell(
     codec_name: str,
     codec_params: dict[str, Any] | None = None,
     keep_reconstructed: bool = False,
+    chunk_duration_s: float | str | None = None,
 ) -> CellResult:
     """One-shot encode + decode + eval on a single input.
 
@@ -81,17 +125,23 @@ def run_cell(
     ds = datasets.load(spec)
     adapter = _resolve_codec(codec_name, codec_params)
 
-    encoded, enc_dt = encode(ds, adapter)
-    reconstructed, dec_dt = decode(encoded, adapter, template=ds.data)
+    # CLI and YAML both hand this in as a string; "None"/"" mean "unset".
+    chunk_s: float | None = (
+        None if chunk_duration_s in (None, "None", "") else float(chunk_duration_s)
+    )
+    chunk_samples = None if chunk_s is None else max(1, round(chunk_s * ds.sample_rate_hz))
+    encoded, enc_dt = encode(ds, adapter, chunk_samples=chunk_samples)
+    reconstructed, dec_dt = decode(encoded, adapter, template=ds.data, chunk_samples=chunk_samples)
 
-    encoded_bytes = len(encoded)
+    n_chunks = len(encoded)
+    encoded_bytes = sum(len(b) for b in encoded)
     cr = metrics.compression_ratio(ds.nbytes, encoded_bytes)
     if not keep_reconstructed:
         # The encoded buffer is dead once its length is recorded, but it is
         # the compressed image of a 27 GB input — several GB that would
         # otherwise sit alongside the metric pass (plan §Phase 3.5 [R5-H2]).
         del encoded
-        encoded = b""
+        encoded = []
     exact = metrics.round_trip_ok(ds.data, reconstructed)
 
     # Every distortion statistic comes from one bounded-memory pass. The
@@ -126,6 +176,10 @@ def run_cell(
         "cr": cr,
         "original_bytes": ds.nbytes,
         "encoded_bytes": encoded_bytes,
+        # Chunking is a comparability axis, not a detail — the paper's
+        # headline figures are all at 1 s chunks (plan §4.6b(b)).
+        "chunk_duration_s": chunk_s,
+        "n_chunks": n_chunks,
         "encode_time_s": enc_dt,
         "decode_time_s": dec_dt,
         "encode_xrt": (duration / enc_dt) if enc_dt > 0 else None,

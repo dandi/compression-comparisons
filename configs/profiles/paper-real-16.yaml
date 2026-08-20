@@ -1,30 +1,30 @@
 # Full paper matrix — all 16 Neuropixels recordings (8 NP1 + 8 NP2) at the
-# paper's own full recording length, raw and band-pass, extended with T.261.
+# paper's own full recording length, under the paper's measurement
+# conditions (plan §4.6b), extended with T.261.
 #
 # THIS IS THE EXPENSIVE ONE. Run `paper-real-np1-8.yaml` first: it clears
-# the Phase 1 median-of-8 gate (plan §5) in ~5 h, and if the ranking is
-# wrong you want to know that before spending days here.
+# the Phase 1 median-of-8 gate in hours, and if the ranking is wrong you
+# want to know that before spending days here.
+#
+# Same four preprocessing conditions and the same chunking policy as the
+# gate profile — including the UNCORRECTED conditions, which are a
+# permanent result in their own right and are never discarded
+# (plan §6 decision 6).
 #
 # Cost, extrapolated from measured 10 s cells on a 32-core / 1 TB host:
-#   - T.261 lossy   ~13-19 h per cell x 160 cells   = the dominant term
-#   - zstd L22      ~11 h per cell x 32 cells
-#   - everything else is minutes-to-hours
-#   Total order ~5 days wall at 21-way parallelism. Budget accordingly and
-#   run under `--keep-going` so one timeout doesn't cost you the sweep.
+# T.261 lossy alone is ~13-19 h per cell. Budget days, run under
+# `--keep-going`, and cap `--cores` near 12-16 on a 1 TB box (~60 GB per
+# concurrent full-length cell after the [R5-H2]/[R5-C1] blocking fixes).
 #
-# Memory: with the Phase 3.5 [R5-H2]/[R5-C1] blocking fixes, a 1200 s cell
-# holds the int16 input + reconstruction (~55 GB) plus a few GB of metric
-# blocks, NOT the ~500 GB the pre-blocking code needed. At 21-way that is
-# ~1.2 TB, so cap `--cores` near 12-16 on a 1 TB box, or drop `duration_s`
-# handling to a shorter slice.
+# `duration_s` is deliberately absent: the loader then reads each
+# recording in full, which is the paper's setting. Durations range from
+# 732 s to 2430 s — see paper-cited-numbers.yaml.
 #
-# `duration_s` is deliberately absent: the loader then reads each recording
-# in full, which is the paper's setting.
-#
-# RUN FROM THE STAMPED STUDY ROOT — see paper-real-np1-8.yaml for the
-# exact command.
+# RUN FROM THE STAMPED STUDY ROOT — see paper-real-np1-8.yaml.
 
 name: paper-real-16
+
+chunk_durations_s: [null, 1.0]
 
 datasets_matrix:
   loader: aind-benchmark
@@ -32,42 +32,69 @@ datasets_matrix:
     start_s: 0.0
 
   recordings:
-    # --- NP1 (8) — the paper's Fig 2 / Fig 7 set ------------------------
+    # `vars.lsb` from the paper's table 1 — see paper-cited-numbers.yaml.
+    # A mismatch is caught by tests/unit/test_paper_cited_numbers.py.
+    # --- NP1 (8) — the paper's Fig 2/6/7 set -----------------------
     - label: ibl-CSHZAD026
+      vars: {lsb: 1}
       params: {path: sourcedata/aind-ephys-compression/ibl-np1/CSHZAD026_2020-09-04_probe00}
     - label: ibl-CSHZAD029
+      vars: {lsb: 1}
       params: {path: sourcedata/aind-ephys-compression/ibl-np1/CSHZAD029_2020-09-09_probe00}
     - label: ibl-SWC054-probe00
+      vars: {lsb: 1}
       params: {path: sourcedata/aind-ephys-compression/ibl-np1/SWC054_2020-10-05_probe00}
     - label: ibl-SWC054-probe01
+      vars: {lsb: 1}
       params: {path: sourcedata/aind-ephys-compression/ibl-np1/SWC054_2020-10-05_probe01}
     - label: aind-625749
+      vars: {lsb: 12}
       params: {path: sourcedata/aind-ephys-compression/aind-np1/625749_2022-08-03_15-15-06_ProbeA}
     - label: aind-634568
+      vars: {lsb: 12}
       params: {path: sourcedata/aind-ephys-compression/aind-np1/634568_2022-08-05_15-59-46_ProbeA}
     - label: aind-634569
+      vars: {lsb: 12}
       params: {path: sourcedata/aind-ephys-compression/aind-np1/634569_2022-08-09_16-14-38_ProbeA}
     - label: aind-634571
+      vars: {lsb: 12}
       params: {path: sourcedata/aind-ephys-compression/aind-np1/634571_2022-08-04_14-27-05_ProbeA}
-    # --- NP2 (8) — the paper's Neuropixels 2.0 set ----------------------
-    - label: aind-np2-595262
+    # --- NP2 (8) ---------------------------------------------------
+    - label: aind-np2-595262-0221
+      vars: {lsb: 3}
       params: {path: sourcedata/aind-ephys-compression/aind-np2/595262_2022-02-21_15-18-07_ProbeA}
-    - label: aind-np2-602454
+    - label: aind-np2-602454-0322
+      vars: {lsb: 3}
       params: {path: sourcedata/aind-ephys-compression/aind-np2/602454_2022-03-22_16-30-03_ProbeB}
     - label: aind-np2-612962-0413
+      vars: {lsb: 3}
       params: {path: sourcedata/aind-ephys-compression/aind-np2/612962_2022-04-13_19-18-04_ProbeB}
     - label: aind-np2-612962-0414
+      vars: {lsb: 3}
       params: {path: sourcedata/aind-ephys-compression/aind-np2/612962_2022-04-14_17-17-10_ProbeC}
-    - label: aind-np2-618197
+    - label: aind-np2-618197-0621
+      vars: {lsb: 3}
       params: {path: sourcedata/aind-ephys-compression/aind-np2/618197_2022-06-21_14-08-06_ProbeC}
-    - label: aind-np2-618318
+    - label: aind-np2-618318-0413
+      vars: {lsb: 3}
       params: {path: sourcedata/aind-ephys-compression/aind-np2/618318_2022-04-13_14-59-07_ProbeB}
-    - label: aind-np2-618384
+    - label: aind-np2-618384-0414
+      vars: {lsb: 3}
       params: {path: sourcedata/aind-ephys-compression/aind-np2/618384_2022-04-14_15-11-00_ProbeB}
-    - label: aind-np2-621362
+    - label: aind-np2-621362-0714
+      vars: {lsb: 3}
       params: {path: sourcedata/aind-ephys-compression/aind-np2/621362_2022-07-14_11-19-36_ProbeA}
 
   preprocessing:
+    # FOUR conditions, not two. LSB correction is an added axis, never a
+    # retrofit — plan §6 decision 6. The uncorrected AIND numbers are a
+    # legitimate, permanent result (what a naive consumer of the AIND
+    # bucket actually gets) and are never discarded or superseded.
+    #
+    # `raw` + `bp`  : data exactly as the benchmark bucket ships it.
+    # `lsb` + `lsbbp`: the paper's measurement condition.
+    # For IBL recordings lsb=1, so `lsb` differs from `raw` only by the
+    # per-channel median removal the paper also applies.
     - label: raw
     - label: bp
       steps:
@@ -75,27 +102,37 @@ datasets_matrix:
           low_hz: 300
           high_hz: 6000
           order: 4
+    - label: lsb
+      steps:
+        - kind: lsb_correction
+          lsb: "${lsb}"
+    - label: lsbbp
+      steps:
+        - kind: lsb_correction
+          lsb: "${lsb}"
+        - kind: bandpass
+          low_hz: 300
+          high_hz: 6000
+          order: 4
 
 codecs:
-  # --- blosc family: level x shuffle, the paper's Fig 2 axis -------------
-  # The paper averages over shuffle variants; both `byte` and `bit` are in
-  # its config set, so both are swept here.
-  - {codec: blosc-lz4,   params: {level: 3, shuffle: byte}}
-  - {codec: blosc-lz4,   params: {level: 3, shuffle: bit}}
+  # --- blosc family: level x shuffle ------------------------------------
+  # All three shuffle options: the paper's best general-purpose config is
+  # blosc-zstd at high level with BIT shuffling, and LZMA with NO shuffling
+  # for NP1 (plan §4.6b(c)). Sweeping only `byte` — as earlier profiles did
+  # — never measured the paper's best configuration.
+  - {codec: blosc-lz4,   params: {level: 9, shuffle: none}}
   - {codec: blosc-lz4,   params: {level: 9, shuffle: byte}}
   - {codec: blosc-lz4,   params: {level: 9, shuffle: bit}}
-  - {codec: blosc-lz4hc, params: {level: 3, shuffle: byte}}
-  - {codec: blosc-lz4hc, params: {level: 3, shuffle: bit}}
+  - {codec: blosc-lz4hc, params: {level: 9, shuffle: none}}
   - {codec: blosc-lz4hc, params: {level: 9, shuffle: byte}}
   - {codec: blosc-lz4hc, params: {level: 9, shuffle: bit}}
-  - {codec: blosc-zlib,  params: {level: 3, shuffle: byte}}
-  - {codec: blosc-zlib,  params: {level: 3, shuffle: bit}}
+  - {codec: blosc-zlib,  params: {level: 9, shuffle: none}}
   - {codec: blosc-zlib,  params: {level: 9, shuffle: byte}}
   - {codec: blosc-zlib,  params: {level: 9, shuffle: bit}}
-  - {codec: blosc-zstd,  params: {level: 3, shuffle: byte}}
-  - {codec: blosc-zstd,  params: {level: 3, shuffle: bit}}
+  - {codec: blosc-zstd,  params: {level: 9, shuffle: none}}
   - {codec: blosc-zstd,  params: {level: 9, shuffle: byte}}
-  - {codec: blosc-zstd,  params: {level: 9, shuffle: bit}}
+  - {codec: blosc-zstd,  params: {level: 9, shuffle: bit}}   # paper's best Zarr config
 
   # --- standard codecs used directly ------------------------------------
   - {codec: gzip,        params: {level: 5}}
@@ -107,16 +144,16 @@ codecs:
 
   # --- T.261 / H.BWC lossless -------------------------------------------
   # NOTE: `combinedPresetEEG_lossless` (joint-channel) is deliberately
-  # ABSENT. It exceeds the 30-minute cell timeout on 384 ch x 10 s and
-  # extrapolates to 60+ h per cell at full length — tracked as [R5-C2] in
-  # plan §Phase 3.5, with three mitigation paths. Re-add it once the
-  # Phase 2b in-process wrapper or channel-group chunking lands.
-  - {codec: t261,        params: {preset: combinedPresetEEG_IndepChannel_lossless}}
+  # ABSENT — it exceeds the 30-minute cell timeout on 384 ch x 10 s and
+  # extrapolates to 60+ h at full length ([R5-C2] in plan §Phase 3.5).
+  # T.261 stays whole-buffer: it is not in the paper, so it needs no 1 s
+  # comparability, and the subprocess adapter would spawn one BWC process
+  # per second of recording.
+  - {codec: t261, chunk_durations_s: [null], params: {preset: combinedPresetEEG_IndepChannel_lossless}}
 
   # --- T.261 / H.BWC lossy QP sweep -------------------------------------
-  # The WavPack-Hybrid `bps` analogue the paper drove for its lossy Pareto.
-  - {codec: t261,        params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 1.5}}
-  - {codec: t261,        params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 2.0}}
-  - {codec: t261,        params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 3.0}}
-  - {codec: t261,        params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 5.0}}
-  - {codec: t261,        params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 8.0}}
+  - {codec: t261, chunk_durations_s: [null], params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 1.5}}
+  - {codec: t261, chunk_durations_s: [null], params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 2.0}}
+  - {codec: t261, chunk_durations_s: [null], params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 3.0}}
+  - {codec: t261, chunk_durations_s: [null], params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 5.0}}
+  - {codec: t261, chunk_durations_s: [null], params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 8.0}}

@@ -96,8 +96,73 @@ def _bandpass(
     return out.reshape(data.shape)
 
 
+def _lsb_correction(
+    data: np.ndarray,
+    sample_rate_hz: float,  # unused; preprocessors share one signature
+    lsb: int | str,
+    max_block_bytes: int | str = _DEFAULT_BLOCK_BYTES,
+) -> np.ndarray:
+    """Rescale acquisition-software-inflated samples back to an LSB of 1.
+
+    Open Ephys rescales Neuropixels data to a fixed 0.195 uV/sample
+    regardless of the hardware gain setting. For raw Neuropixels data that
+    makes every stored sample an exact multiple of 12 (NP1) or 3 (NP2) —
+    so log2(lsb) bits per sample carry no information, and general-purpose
+    codecs that cannot see that structure waste them. SpikeGLX writes raw
+    ADC values and already has an LSB of 1.
+
+    Buccino et al. 2023 §2.2.1, verbatim:
+
+        Prior to compression, we rescaled the Open Ephys data to have an
+        LSB of 1 by first removing each channel's median (since scaling
+        could introduce rounding errors) and dividing by either 12 or 3.
+
+    Median removal comes first for exactly the stated reason: the DC
+    offset is not itself a multiple of `lsb`, so dividing without
+    centring would leave a fractional remainder that rounds
+    inconsistently across channels.
+
+    ``lsb=1`` is the SpikeGLX case. It is NOT a no-op — the per-channel
+    median is still removed, matching what the paper does to every
+    dataset it marks LSB-corrected. Pass the recording's own LSB from
+    the paper's table 1 (IBL NP1: 1, AIND NP1: 12, AIND NP2: 3).
+
+    This is an added condition, never a correction applied in place —
+    see plan §6 decision 6. Uncorrected AIND numbers stand on their own.
+    """
+    lsb_i = int(lsb)
+    if lsb_i < 1:
+        raise ValueError(f"lsb must be a positive integer; got {lsb_i}")
+
+    flat = data[:, None] if data.ndim == 1 else data
+    n_samples, n_channels = flat.shape
+    original_dtype = data.dtype
+    if n_samples == 0 or n_channels == 0:
+        return data
+
+    # Per-channel median over the full time axis, so block by channel.
+    block_bytes = int(max_block_bytes)
+    col_bytes = n_samples * 8
+    cols_per_block = max(1, min(n_channels, block_bytes // max(col_bytes, 1)))
+
+    out = np.empty_like(flat)
+    is_int = np.issubdtype(original_dtype, np.integer)
+    for c0 in range(0, n_channels, cols_per_block):
+        c1 = min(c0 + cols_per_block, n_channels)
+        block = flat[:, c0:c1].astype(np.float64)
+        block -= np.median(block, axis=0, keepdims=True)
+        if lsb_i != 1:
+            block /= lsb_i
+        if is_int:
+            np.round(block, out=block)
+        out[:, c0:c1] = block.astype(original_dtype)
+        del block
+    return out.reshape(data.shape)
+
+
 _REGISTRY: dict[str, Callable[..., np.ndarray]] = {
     "bandpass": _bandpass,
+    "lsb_correction": _lsb_correction,
 }
 
 

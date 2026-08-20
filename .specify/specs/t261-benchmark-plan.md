@@ -356,6 +356,70 @@ The core scientific question is not "what's the compression ratio?" — the pape
 - (c) T.261 QP=X where X is the "sorting-transparent" boundary — the highest QP that stays within the paper's stated ~10 % waveform-feature error tolerance.
 - (d) Failure modes documented (which units are affected at higher QP; symmetric or biased?).
 
+### 4.6b Matching the paper's measurement conditions (added 2026-08-20)
+
+Reading the analysis capsule
+([`aind-capsule-ephys-compression-results`](https://github.com/AllenNeuralDynamics/aind-capsule-ephys-compression-results),
+`code/lossless.ipynb`) alongside the published Methods turned up three
+conditions our sweep did not reproduce. Each one moves CR, so a
+comparison against the paper is not meaningful until they match.
+
+**(a) LSB correction — `lsb != 'false'` in the capsule's headline query.**
+
+SpikeGLX writes raw ADC values, giving a least-significant bit of 1.
+Open Ephys rescales to a fixed 0.195 µV/sample regardless of hardware
+gain, which for raw Neuropixels data makes the LSB **12 for NP1 and 3
+for NP2** — i.e. every sample is a multiple of 12 (or 3), wasting
+log2(12) ≈ 3.6 bits of entropy per sample on codecs that cannot see the
+structure. Paper's Methods, verbatim:
+
+> Prior to compression, we rescaled the Open Ephys data to have an LSB of
+> 1 by first removing each channel's median (since scaling could
+> introduce rounding errors) and dividing by either 12 or 3.
+
+Per-session LSB values are in the paper's table 1:
+
+| Source   | Probe | Acquisition | Gain (µV/sample) | LSB |
+| -------- | ----- | ----------- | ---------------: | --: |
+| IBL      | NP1   | SpikeGLX    | 2.34             |  1  |
+| AIND     | NP1   | Open Ephys  | 0.195            | 12  |
+| AIND     | NP2   | Open Ephys  | 0.195            |  3  |
+| MEArec   | NP1/NP2 | simulated | 0.195            | 12 / 3 |
+
+So 4 of the 8 NP1 recordings in our gate need it, and all 8 NP2. IBL
+recordings are unaffected (LSB 1 → the correction is a no-op beyond
+median removal).
+
+**This is an added axis, not a retrofit** — see §6 decision 6. Both
+corrected and uncorrected AIND numbers are swept and reported.
+
+**(b) Chunk duration — `chunk_duration == '1s'` in the headline query.**
+
+The paper compresses through a Zarr store with chunks of (chunk_samples,
+n_channels), sweeping 0.1 / 1 / 10 s, and every headline figure filters
+to **1 s**. We were compressing the entire loaded buffer as a single
+chunk, which is a different — and generally more favourable — condition,
+since a codec sees far more context. Chunk duration becomes a profile
+axis; CR is `original_bytes / sum(len(encoded_chunk))`.
+
+This also makes the random-access latency metric (§4.5) meaningful, and
+it is closer to how compressed ephys is actually stored.
+
+**(c) Shuffle variants.** The paper's best configurations are
+`blosc-zstd` at high level with **bit** shuffling, and `LZMA` with **no**
+shuffling for NP1 / byte for NP2. Our profiles swept only `byte`, so we
+were not measuring the paper's best general-purpose configuration at all.
+All three shuffle options are now swept for the blosc family.
+
+**Gate numbers now available without the Code Ocean data asset.** The
+paper's Results text quotes medians ± SD with N = 8 per distribution;
+they are transcribed into `.specify/specs/paper-cited-numbers.yaml`. The
+capsule's per-recording CSVs would add distribution-level comparison but
+are not required for the §5 gate. Note also that the paper reports
+**median ± SD, not mean** (capsule cells 26/55/65/79 are
+`.median().round(2)` / `.std().round(2)`) — earlier drafts of §5 said
+"mean-of-8", which was wrong; our median-of-8 is directly comparable.
+
 ### 4.6 Dataset ingestion
 
 Start with three loaders, each behind one YAML schema:
@@ -397,16 +461,23 @@ Ordered by increasing scope; each phase is independently useful and PR-sized.
    blosc-lz4 > lz4) on any single recording. **Necessary but not sufficient.**
 2. **Median-of-8 match:** run our sweep on the same 8 NP1 recordings; take the
    per-codec median across recordings + configs; compare against the paper's
-   published mean-of-8. Target: **within ± 5% of the paper's mean, or within
-   the paper's reported SD** (whichever is looser). Both raw (matches Fig 2)
-   and band-pass (matches Fig 7) should be reported side-by-side.
+   published **median**-of-8. (Corrected 2026-08-20: the paper reports median
+   ± SD, not mean — see §4.6b. Our median is therefore directly comparable.)
+   Target: **within ± 5% of the paper's median, or within the paper's reported
+   SD** (whichever is looser). Both raw (matches Fig 2/6) and band-pass
+   (matches Fig 7) should be reported side-by-side. The comparison is only
+   valid against cells run at the paper's conditions — LSB-corrected,
+   1 s chunks, matching shuffle (§4.6b).
 3. **con-duct sanity:** peak-RSS ranks codecs plausibly (`lzma` > `blosc-zstd` etc).
 
-Paper's per-recording CSVs live in the Code Ocean capsule
-`AllenNeuralDynamics/aind-capsule-ephys-compression-results` (data asset,
-account required) — fetch them once, drop the per-recording numbers into
-`.specify/specs/paper-cited-numbers.yaml`, and let the aggregator diff
-automatically.
+The paper's own Results text quotes the medians ± SD we need; they are
+transcribed into `.specify/specs/paper-cited-numbers.yaml` (2026-08-20).
+The per-recording CSVs behind the figures are a Code Ocean *data asset*
+(`ephys-compression-results`) — the analysis capsule
+`AllenNeuralDynamics/aind-capsule-ephys-compression-results` is public on
+GitHub but ships notebooks with outputs stripped. Those CSVs would enable
+a distribution-level comparison (do our 8 points overlap theirs?); they
+are not required for the median gate.
 
 ### Phase 2 — T.261 `numcodecs` wrapper (~6 engineer-days; no external blockers)
 
@@ -558,6 +629,45 @@ Two directions, both optional relative to the primary Phase-3 goal:
 3. **Spike sorter: configurable per run; paper reproduction pins Kilosort 2.5.** `configs/profiles/paper.yaml` → sorter=`kilosort2_5`, image=`compbench-ks25`. `configs/profiles/full.yaml` (new-dataset runs) → sorter=`kilosort4`, image=`compbench-ks4`. `spykingcircus2` also registered but not on the default path.
 4. **Wrapper hosting: `src/t261_numcodecs/` in this repo for now.** Rationale in §4.1a. If external consumers (DANDI ingest, pynwb, xarray) start depending on it, we split it into `dandi/t261-numcodecs` — the wrapper package layout is designed to make that move trivial (swap `../bwc/` path for `vendor/bwc/` submodule; no other changes).
 5. **First public report uses Buccino et al.'s exact datasets** — the goal is to slot T.261 into the *same* comparison the paper made, so the reader sees T.261 alongside FLAC / WavPack / blosc-zstd on identical inputs. Expansion to new datasets — including Neuropixels v2 "quads" and other DANDI holdings — is explicitly a follow-up phase, not a Phase-3 blocker.
+
+6. **Published derivatives are IMMUTABLE. Never discard, overwrite, or
+   re-run-in-place a result that has been committed to the study.**
+   (Locked 2026-08-20.)
+
+   Every sweep already committed under
+   `results/dandi-t261-compression-study/derivatives/` is a permanent
+   record of what this code produced against that input on that date. In
+   particular the **original AIND numbers — measured on the data exactly
+   as the AIND benchmark bucket ships it — are an absolute. They are not
+   corrected, superseded, or replaced.**
+
+   This matters right now because the paper applies an *LSB correction*
+   to Open Ephys data before compressing (§4.6b): it removes each
+   channel's median and divides by 12 (AIND NP1) or 3 (AIND NP2). That
+   correction changes CR substantially. It would be easy to treat the
+   uncorrected AIND numbers as "wrong" and re-run over them. They are
+   not wrong — they are the compression performance of the data as
+   distributed, which is a legitimate and separately interesting result
+   (it is what a naive downstream consumer of that bucket would actually
+   get).
+
+   Therefore:
+
+   - LSB correction is a **new axis**, never a fix. Both `lsb_correction:
+     off` and `lsb_correction: on` are swept and both are reported, with
+     the axis surfaced in `report.parquet` and in the rendered table.
+   - The same rule governs every other methodology change that moves a
+     number — chunk duration, shuffle variant, filter representation.
+     Add a condition; do not silently redefine an old one.
+   - A new sweep goes in a **new dated derivative directory**. Existing
+     ones are never edited. If an old derivative lacks a column a new
+     metric added, that is a fact about when it was run, and the
+     aggregator tolerates it (see [R2-H1]).
+   - Corollary already applied: `preprocessing._bandpass` deliberately
+     stays on `filtfilt` rather than moving to the numerically nicer
+     `sosfiltfilt`, because the switch would shift every published
+     band-pass CR. If we adopt SOS it will be as a labelled condition
+     with a before/after, not as a quiet improvement.
 
 **Deferred (revisit when we have first results):**
 

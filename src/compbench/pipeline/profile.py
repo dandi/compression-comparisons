@@ -61,6 +61,7 @@ class Cell:
     codec_params: dict[str, Any] = field(default_factory=dict)
     dataset_label: str = ""  # short human-readable name
     codec_label: str = ""  # short human-readable name
+    chunk_duration_s: float | None = None
 
     @property
     def codec_params_cli(self) -> str:
@@ -74,6 +75,7 @@ class Profile:
     datasets: list[str]
     codecs: list[dict[str, Any]]
     datasets_matrix: dict[str, Any] | None = None
+    chunk_durations_s: list[float | None] = field(default_factory=lambda: [None])
 
     def raw(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -83,6 +85,8 @@ class Profile:
         }
         if self.datasets_matrix is not None:
             out["datasets_matrix"] = self.datasets_matrix
+        if self.chunk_durations_s != [None]:
+            out["chunk_durations_s"] = self.chunk_durations_s
         return out
 
 
@@ -158,6 +162,7 @@ def load_profile(
         "datasets",
         "datasets_matrix",
         "codecs",
+        "chunk_durations_s",
         "results_dir",
         "container_base",
     }
@@ -184,7 +189,7 @@ def load_profile(
     codecs = raw.get("codecs") or []
     if not isinstance(codecs, list) or not codecs:
         raise ValueError(f"Profile {label}: `codecs:` must be a non-empty list")
-    _allowed_codec_keys = {"codec", "params"}
+    _allowed_codec_keys = {"codec", "params", "chunk_durations_s"}
     for i, c in enumerate(codecs):
         if not isinstance(c, dict) or "codec" not in c:
             raise ValueError(f"Profile {label}: codecs[{i}] must be a dict with `codec:`")
@@ -194,17 +199,64 @@ def load_profile(
                 f"Profile {label}: codecs[{i}] has unknown key(s) {sorted(unknown)}. "
                 f"Allowed: {sorted(_allowed_codec_keys)} — did you mean `params:`?"
             )
+        if "chunk_durations_s" in c:
+            _parse_chunk_durations(c["chunk_durations_s"], f"{label}: codecs[{i}]")
+    chunks = _parse_chunk_durations(raw.get("chunk_durations_s"), label)
     anchor = Path(base_dir).resolve() if base_dir is not None else None
     return Profile(
         name=str(name),
         datasets=[_resolve_dataset_spec(str(d), anchor) for d in datasets],
         codecs=list(codecs),
         datasets_matrix=matrix,
+        chunk_durations_s=chunks,
     )
 
 
+def _parse_chunk_durations(raw: Any, label: str) -> list[float | None]:
+    """Validate the `chunk_durations_s:` axis.
+
+    Absent means one whole-buffer chunk, which is what every profile did
+    before this axis existed. `null` is allowed *inside* the list so a
+    profile can sweep "whole buffer" alongside "1 s" in one run.
+    """
+    if raw is None:
+        return [None]
+    if not isinstance(raw, list) or not raw:
+        raise ValueError(f"Profile {label}: `chunk_durations_s:` must be a non-empty list")
+    out: list[float | None] = []
+    for i, v in enumerate(raw):
+        if v is None:
+            out.append(None)
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"Profile {label}: chunk_durations_s[{i}] must be a number or null; got {v!r}"
+            ) from None
+        if f <= 0:
+            raise ValueError(f"Profile {label}: chunk_durations_s[{i}] must be > 0; got {f}")
+        out.append(f)
+    if len(set(map(repr, out))) != len(out):
+        raise ValueError(f"Profile {label}: duplicate entries in `chunk_durations_s:`")
+    return out
+
+
+def _chunk_label(chunk_duration_s: float | None) -> str:
+    """`chunk1s` / `chunk0.1s`, or empty for the whole-buffer default.
+
+    Empty for the default keeps cell IDs — and therefore results
+    directories — byte-identical to pre-axis sweeps, so adding the axis
+    does not orphan existing derivatives.
+    """
+    if chunk_duration_s is None:
+        return ""
+    text = f"{chunk_duration_s:g}"
+    return f"chunk{text}s"
+
+
 _MATRIX_KEYS = {"loader", "params", "recordings", "preprocessing"}
-_RECORDING_KEYS = {"label", "params"}
+_RECORDING_KEYS = {"label", "params", "vars"}
 _PREPROC_KEYS = {"label", "steps"}
 
 
@@ -247,6 +299,8 @@ def _validate_datasets_matrix(matrix: Any, label: str) -> None:
             raise ValueError(f"{where}: recordings[{i}] missing `label:`")
         if not isinstance(rec.get("params", {}), dict):
             raise ValueError(f"{where}: recordings[{i}] `params:` must be a mapping")
+        if not isinstance(rec.get("vars", {}), dict):
+            raise ValueError(f"{where}: recordings[{i}] `vars:` must be a mapping")
         if str(rlabel) in seen_rec:
             raise ValueError(f"{where}: duplicate recording label {rlabel!r}")
         seen_rec.add(str(rlabel))
@@ -335,13 +389,18 @@ def materialize_datasets_matrix(matrix: dict[str, Any], out_dir: str | Path) -> 
     paths: list[str] = []
     for rec in matrix["recordings"]:
         rec_params = dict(rec.get("params", {}))
+        rec_vars = dict(rec.get("vars", {}))
         for pre in preprocs:
             # Per-recording params win over the matrix-wide defaults.
             params = {**common, **rec_params}
             cfg: dict[str, Any] = {"loader": loader, "params": params}
             steps = pre.get("steps")
             if steps:
-                cfg["preprocessing"] = list(steps)
+                cfg["preprocessing"] = _substitute_vars(
+                    list(steps),
+                    rec_vars,
+                    f"recording {rec['label']!r}, preprocessing {pre['label']!r}",
+                )
             name = f"{_slug(str(rec['label']), 60)}-{_slug(str(pre['label']), 20)}"
             path = out / f"{name}.yaml"
             text = (
@@ -355,6 +414,46 @@ def materialize_datasets_matrix(matrix: dict[str, Any], out_dir: str | Path) -> 
                 path.write_text(text)
             paths.append(str(path))
     return paths
+
+
+_VAR_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+
+
+def _substitute_vars(steps: list[Any], rec_vars: dict[str, Any], where: str) -> list[Any]:
+    """Replace ``${name}`` placeholders in preprocessing steps from a recording's `vars:`.
+
+    Some preprocessing parameters are properties of the *recording*, not of
+    the condition. The clearest case is LSB correction: the divisor is 1 for
+    SpikeGLX-acquired IBL data, 12 for AIND NP1 and 3 for AIND NP2 (plan
+    §4.6b(a)). One shared `preprocessing:` list cannot hardcode it, so the
+    recording declares `vars: {lsb: 12}` and the step says
+    ``lsb: "${lsb}"``.
+
+    An undefined placeholder is an error, never a silent pass-through: a
+    step that quietly divided by the literal string "${lsb}" — or skipped —
+    would produce a plausible-looking number computed on the wrong data.
+    """
+
+    def sub(value: Any) -> Any:
+        if isinstance(value, str):
+            m = _VAR_RE.match(value.strip())
+            if m:
+                name = m.group(1)
+                if name not in rec_vars:
+                    raise ValueError(
+                        f"{where}: preprocessing references ${{{name}}} but the recording "
+                        f"defines no such var. Available: {sorted(rec_vars) or '(none)'}. "
+                        f"Add it under the recording's `vars:` block."
+                    )
+                return rec_vars[name]
+            return value
+        if isinstance(value, dict):
+            return {k: sub(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [sub(v) for v in value]
+        return value
+
+    return [sub(step) for step in steps]
 
 
 def expand_matrix(profile: Profile, generated_dir: str | Path | None = None) -> Iterator[Cell]:
@@ -381,18 +480,33 @@ def expand_matrix(profile: Profile, generated_dir: str | Path | None = None) -> 
         for cfg in profile.codecs:
             codec_name = str(cfg["codec"])
             params = dict(cfg.get("params", {}))
-            clabel = _codec_label(codec_name, params)
-            cid = _cell_id(dlabel, clabel)
-            if cid in seen:
-                # Collision → hash-suffix to disambiguate.
-                extra = hashlib.sha256(f"{dspec}|{codec_name}|{params}".encode()).hexdigest()[:6]
-                cid = f"{cid}_{extra}"
-            seen.add(cid)
-            yield Cell(
-                cell_id=cid,
-                dataset_spec=dspec,
-                codec=codec_name,
-                codec_params=params,
-                dataset_label=dlabel,
-                codec_label=clabel,
+            # A codec may narrow the chunking axis. Chunking exists to match
+            # the paper's 1 s Zarr chunks; codecs the paper never tested
+            # (T.261) gain nothing from it, and for the subprocess-based
+            # T.261 adapter a 1 s chunk means one process spawn per second
+            # of recording.
+            codec_chunks = (
+                _parse_chunk_durations(cfg["chunk_durations_s"], "<cell>")
+                if "chunk_durations_s" in cfg
+                else profile.chunk_durations_s
             )
+            for chunk_s in codec_chunks:
+                clabel = _codec_label(codec_name, params)
+                chunk_tag = _chunk_label(chunk_s)
+                cid = _cell_id(dlabel, f"{clabel}-{chunk_tag}" if chunk_tag else clabel)
+                if cid in seen:
+                    # Collision → hash-suffix to disambiguate.
+                    extra = hashlib.sha256(
+                        f"{dspec}|{codec_name}|{params}|{chunk_s}".encode()
+                    ).hexdigest()[:6]
+                    cid = f"{cid}_{extra}"
+                seen.add(cid)
+                yield Cell(
+                    cell_id=cid,
+                    dataset_spec=dspec,
+                    codec=codec_name,
+                    codec_params=params,
+                    dataset_label=dlabel,
+                    codec_label=clabel,
+                    chunk_duration_s=chunk_s,
+                )

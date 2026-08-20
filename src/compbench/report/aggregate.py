@@ -80,6 +80,9 @@ def _preprocessing_summary(manifest: dict[str, Any]) -> str:
             parts.append(str(step))
             continue
         kind = step.get("kind", "?")
+        if kind == "lsb_correction":
+            parts.append(f"lsb{step.get('lsb', '?')}")
+            continue
         if kind == "bandpass":
             parts.append(
                 f"bandpass({step.get('low_hz', '?')}-{step.get('high_hz', '?')}Hz"

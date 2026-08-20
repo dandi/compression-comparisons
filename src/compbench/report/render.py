@@ -61,6 +61,20 @@ def _preproc_of(row: dict[str, Any]) -> str:
     return str(v) if v else "raw"
 
 
+def _chunk_of(row: dict[str, Any]) -> str:
+    """Chunk-duration label. `whole` when the cell compressed one buffer.
+
+    Never blank: the paper's headline figures are at 1 s chunks and a
+    whole-buffer number is a different, more favourable condition
+    (plan §4.6b(b)). A blank cell would read as "not applicable" rather
+    than "not comparable".
+    """
+    v = row.get("metric_chunk_duration_s")
+    if v is None:
+        return "whole"
+    return f"{float(v):g}s"
+
+
 def _median(values: list[float]) -> float:
     ordered = sorted(values)
     n = len(ordered)
@@ -105,13 +119,15 @@ def render_markdown(
     # error (paper Fig 4-6 methodology) and `PRDN/ch` is the per-channel
     # median — the reader-facing distortion figure per plan [R1-H2].
     table = [
-        "| dataset | preproc | codec | params | CR | enc xRT | dec xRT | RMSE | "
+        "| dataset | preproc | chunk | codec | params | CR | enc xRT | dec xRT | RMSE | "
         "RMSE_bp | PRDN/ch % | lossless | wall_s | RSS GB |",
-        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | :---: | ---: | ---: |",
+        "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: "
+        "| :---: | ---: | ---: |",
     ]
     for r in rows_list:
         dataset = _dataset_of(r.get("cell_dir"))
         preproc = _preproc_of(r)
+        chunk = _chunk_of(r)
         codec = str(r.get("codec_name", "—"))
         disc = _discriminator(r.get("cell_dir"))
         cr = _fmt_num(r.get("metric_cr"))
@@ -130,7 +146,7 @@ def render_markdown(
             else "—"
         )
         table.append(
-            f"| {dataset} | {preproc} | {codec} | {disc} | {cr} | {enc} | {dec} | "
+            f"| {dataset} | {preproc} | {chunk} | {codec} | {disc} | {cr} | {enc} | {dec} | "
             f"{rmse} | {rmse_bp} | {prdn_ch} | {lossless_cell} | {wall} | {rss_gb} |"
         )
     table.extend(_median_section(rows_list))
@@ -189,7 +205,7 @@ def _median_section(rows_list: list[dict[str, Any]]) -> list[str]:
         if cr == float("-inf"):
             continue
         key = (
-            _preproc_of(r),
+            f"{_preproc_of(r)} @ {_chunk_of(r)}",
             str(r.get("codec_name", "—")),
             _discriminator(r.get("cell_dir")),
         )
@@ -203,7 +219,7 @@ def _median_section(rows_list: list[dict[str, Any]]) -> list[str]:
         "comparable per-codec figure. `n` is the number of datasets "
         "contributing — a short `n` means cells are still missing or failed.",
         "",
-        "| preproc | codec | params | median CR | min | max | n |",
+        "| preproc @ chunk | codec | params | median CR | min | max | n |",
         "| --- | --- | --- | ---: | ---: | ---: | ---: |",
     ]
     # Sort by preprocessing, then median CR descending — stable across runs.
