@@ -43,3 +43,6 @@ results/
 
 # Codec scratch (TMPDIR) — see .env
 .tmp/
+
+# Vendored third-party builds (see scripts/build_wavpack.sh)
+vendor/

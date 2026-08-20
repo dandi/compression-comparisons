@@ -16,8 +16,9 @@ SMOKE_CELL  ?= $(RESULTS_DIR)/blosc-zstd-l3
 export
 
 REPO_ROOT   := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
-COMPBENCH_TMPDIR        ?= .tmp
-COMPBENCH_BLOSC_THREADS ?= 1
+COMPBENCH_TMPDIR         ?= .tmp
+COMPBENCH_BLOSC_THREADS  ?= 1
+COMPBENCH_WAVPACK_PREFIX ?= vendor/wavpack
 
 # Codec subprocesses stage raw + encoded copies through TMPDIR; the default
 # /tmp is usually the small root overlay on a container host. Resolve to an
@@ -25,6 +26,19 @@ COMPBENCH_BLOSC_THREADS ?= 1
 TMPDIR := $(abspath $(if $(patsubst /%,,$(COMPBENCH_TMPDIR)),$(REPO_ROOT)/$(COMPBENCH_TMPDIR),$(COMPBENCH_TMPDIR)))
 export TMPDIR
 export COMPBENCH_BLOSC_THREADS
+
+# WavPack: `wavpack-numcodecs` links against the system library only when a
+# `wavpack` binary is on PATH — otherwise it demands an exact glibc match that
+# no host here satisfies. See .env.
+WAVPACK_PREFIX := $(abspath $(if $(patsubst /%,,$(COMPBENCH_WAVPACK_PREFIX)),$(REPO_ROOT)/$(COMPBENCH_WAVPACK_PREFIX),$(COMPBENCH_WAVPACK_PREFIX)))
+ifneq ($(wildcard $(WAVPACK_PREFIX)/bin/wavpack),)
+  export PATH := $(WAVPACK_PREFIX)/bin:$(PATH)
+  export LD_LIBRARY_PATH := $(WAVPACK_PREFIX)/lib:$(LD_LIBRARY_PATH)
+endif
+
+.PHONY: wavpack
+wavpack:
+	@scripts/build_wavpack.sh
 
 .PHONY: scratchdir
 scratchdir:
@@ -35,6 +49,7 @@ env-info: scratchdir
 	@echo "TMPDIR                  = $(TMPDIR)"
 	@df -h "$(TMPDIR)" | tail -1
 	@echo "COMPBENCH_BLOSC_THREADS = $(COMPBENCH_BLOSC_THREADS)"
+	@echo "WAVPACK_PREFIX          = $(WAVPACK_PREFIX) ($(if $(wildcard $(WAVPACK_PREFIX)/bin/wavpack),found,MISSING - run 'make wavpack'))"
 
 .DEFAULT_GOAL := help
 
@@ -42,6 +57,7 @@ env-info: scratchdir
 help:
 	@echo "Targets:"
 	@echo "  env-info        - show resolved TMPDIR + blosc threads and free space"
+	@echo "  wavpack         - build libwavpack into vendor/ (needed for the wavpack codec)"
 	@echo "  install         - create .venv and install compbench in devel mode"
 	@echo "  test            - unit tests (tox -e py311)"
 	@echo "  lint            - ruff check + format-check (tox -e lint)"

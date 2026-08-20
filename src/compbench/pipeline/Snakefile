@@ -57,6 +57,45 @@ os.environ["TMPDIR"] = TMPDIR
 os.environ.setdefault("COMPBENCH_BLOSC_THREADS", "1")
 
 
+# ---- WavPack --------------------------------------------------------------
+#
+# `wavpack-numcodecs` loads libwavpack at import time. When it was built
+# against a vendored prefix (scripts/build_wavpack.sh) that prefix has to be on
+# the loader path, or `import wavpack_numcodecs` fails and the codec silently
+# does not register — which the Snakefile's codec check would then report as
+# "codec not registered on this host", pointing at the wrong problem.
+def _wavpack_prefix() -> str | None:
+    repo_root = Path(workflow.basedir).resolve().parents[2]
+    configured = os.environ.get("COMPBENCH_WAVPACK_PREFIX")
+    if configured is None and (repo_root / ".env").is_file():
+        for line in (repo_root / ".env").read_text().splitlines():
+            line = line.strip()
+            if line.startswith("COMPBENCH_WAVPACK_PREFIX="):
+                configured = line.split("=", 1)[1].strip()
+                break
+    if not configured:
+        return None
+    p = Path(configured)
+    p = p if p.is_absolute() else (repo_root / p)
+    return str(p.resolve()) if (p / "bin" / "wavpack").exists() else None
+
+
+# Captured BEFORE the mutation below: the loader only honours what was set at
+# process start, so this is the value that actually decided whether the
+# extension could load.
+LD_PATH_AT_START = os.environ.get("LD_LIBRARY_PATH", "")
+WAVPACK_PREFIX = _wavpack_prefix()
+WAVPACK_EXPORT = (
+    f'export PATH={shlex.quote(WAVPACK_PREFIX + "/bin")}:"$PATH"; '
+    f'export LD_LIBRARY_PATH={shlex.quote(WAVPACK_PREFIX + "/lib")}:"${{LD_LIBRARY_PATH:-}}"'
+) if WAVPACK_PREFIX else ":"
+if WAVPACK_PREFIX:
+    os.environ["PATH"] = f"{WAVPACK_PREFIX}/bin:" + os.environ.get("PATH", "")
+    os.environ["LD_LIBRARY_PATH"] = (
+        f"{WAVPACK_PREFIX}/lib:" + os.environ.get("LD_LIBRARY_PATH", "")
+    )
+
+
 # ---- Config ---------------------------------------------------------------
 
 # `--profile /path/to.yaml` loads by path; `--configfile /path/to.yaml`
@@ -84,11 +123,30 @@ from compbench import codecs as _cbcodecs
 _available = set(_cbcodecs.names())
 _missing = sorted({c.codec for c in CELLS if c.codec not in _available})
 if _missing:
+    _hint = (
+        "Fix by installing the codec's extras (e.g. `pip install -e .[audio]` for "
+        "wavpack; `cmake --build src/bwc/build` for t261) — see plan §4.2 / §5."
+    )
+    # A vendored libwavpack that the loader cannot see produces exactly the
+    # same symptom as a codec that was never installed, and sends you looking
+    # in the wrong place. LD_LIBRARY_PATH is read at process start, so setting
+    # it from inside this file is too late for our own import — say so.
+    if (
+        "wavpack" in _missing
+        and WAVPACK_PREFIX
+        and f"{WAVPACK_PREFIX}/lib" not in LD_PATH_AT_START
+    ):
+        _hint = (
+            f"`wavpack-numcodecs` IS installed and a libwavpack build exists at\n"
+            f"  {WAVPACK_PREFIX}\n"
+            f"but the dynamic loader cannot see it. LD_LIBRARY_PATH is read at "
+            f"process start, so this Snakefile cannot fix it for its own import.\n"
+            f"Run the sweep through `make`, which exports it, or set it yourself:\n"
+            f"  export LD_LIBRARY_PATH={WAVPACK_PREFIX}/lib:$LD_LIBRARY_PATH"
+        )
     raise WorkflowError(
         f"Profile requests codec(s) not registered on this host: {_missing}.\n"
-        f"Available codecs: {sorted(_available)}\n"
-        f"Fix by installing the codec's extras (e.g. `pip install -e .[audio]` for "
-        f"wavpack; `cmake --build src/bwc/build` for t261) — see plan §4.2 / §5."
+        f"Available codecs: {sorted(_available)}\n" + _hint
     )
 
 CONTAINER_BASE = config.get(
@@ -175,6 +233,7 @@ rule run_cell:
         r"""
         export TMPDIR={TMPDIR:q}
         export COMPBENCH_BLOSC_THREADS="${{COMPBENCH_BLOSC_THREADS:-1}}"
+        {WAVPACK_EXPORT}
         mkdir -p {params.cell_dir_q}
         duct \
             --output-prefix {params.cell_dir_q}/duct- \
