@@ -73,6 +73,16 @@ def load_profile(source: str | Path | dict[str, Any]) -> Profile:
         label = str(p)
         with p.open() as f:
             raw = yaml.safe_load(f) or {}
+    # Strict-key check (round-2 R4-H2): silent typos in profile YAMLs are the
+    # same bug factory as in dataset YAMLs; a hand-authored `paper-real.yaml`
+    # with `datasetss:` or `codes:` would silently produce an empty sweep.
+    _allowed_top = {"name", "datasets", "codecs", "results_dir", "container_base"}
+    unknown = set(raw) - _allowed_top
+    if unknown:
+        raise ValueError(
+            f"Profile {label}: unknown top-level key(s) {sorted(unknown)}. "
+            f"Allowed: {sorted(_allowed_top)}."
+        )
     name = raw.get("name")
     if not name:
         raise ValueError(f"Profile {label}: missing `name:`")
@@ -82,9 +92,16 @@ def load_profile(source: str | Path | dict[str, Any]) -> Profile:
     codecs = raw.get("codecs") or []
     if not isinstance(codecs, list) or not codecs:
         raise ValueError(f"Profile {label}: `codecs:` must be a non-empty list")
+    _allowed_codec_keys = {"codec", "params"}
     for i, c in enumerate(codecs):
         if not isinstance(c, dict) or "codec" not in c:
             raise ValueError(f"Profile {label}: codecs[{i}] must be a dict with `codec:`")
+        unknown = set(c) - _allowed_codec_keys
+        if unknown:
+            raise ValueError(
+                f"Profile {label}: codecs[{i}] has unknown key(s) {sorted(unknown)}. "
+                f"Allowed: {sorted(_allowed_codec_keys)} — did you mean `params:`?"
+            )
     return Profile(name=str(name), datasets=[str(d) for d in datasets], codecs=list(codecs))
 
 

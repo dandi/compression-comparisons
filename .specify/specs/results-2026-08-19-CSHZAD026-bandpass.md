@@ -1,8 +1,9 @@
 # Second reproduction — CSHZAD026 + band-pass 300–6000 Hz (2026-08-19)
 
 Same setup as the first reproduction (`results-2026-08-19-CSHZAD026.md`),
-now with the paper's 300–6000 Hz band-pass preprocessing applied. Matches
-Buccino et al. Fig 2 methodology exactly.
+now with the paper's 300–6000 Hz band-pass preprocessing applied. This
+matches the paper's Fig 7 preprocessing methodology (**not** Fig 2, which
+is raw — see "Paper cross-check — corrected mapping" below).
 
 ## Delta vs raw sweep (same recording, same codec configs)
 
@@ -57,21 +58,24 @@ What we CAN say from this run:
 **T.261 IndepChannel lossless (CR 6.90) beats every general-purpose lossless
 codec in this sweep by 105 %.** WavPack was not run in this profile — see
 `paper-with-wavpack.yaml` to include it. T.261 lossy QP=1.5 (CR 8.76,
-PRDN ≈ 4.9 % of signal RMS on band-pass data) more than doubles compression
+PRDN ≈ 4.8 % of signal RMS on band-pass data — pooled; ~8.6 % on the
+median per-channel band-pass std of 4.7) more than doubles compression
 over lzma; distortion level is small but not "imperceptible" (spike-sorting
 fidelity not yet evaluated — see Caveats). T.261 QP=8 hits CR 23.5 at
-PRDN ≈ 18 % — likely severe degradation of small-amplitude spikes;
-requires sorting-fidelity eval before use.
+PRDN ≈ 18 % pooled (~32 % per-channel median) — likely severe degradation
+of small-amplitude spikes; requires sorting-fidelity eval before use.
 
 ## Caveats
 
 - Paper Fig 2 = raw data; Fig 7 = preprocessed. Cross-check my results
   against the matching figure. Earlier drafts of this note bundled the
   wrong pairing.
-- Paper reports means ± SD across 8 NP1 recordings × multiple shuffle/level
-  configs (N = 48-72 per bar). Our single-recording × single-config
-  numbers are single points in that distribution, not directly comparable
-  to a mean.
+- Paper Fig 7 (the preprocessed comparison) reports per-codec distributions
+  with **N = 8** (one per recording, no per-config sweep). Fig 2 (raw) has
+  N = 48-72 per bar (8 recordings × up to 9 shuffle/level configs). Our
+  single-recording × single-config bandpass numbers are one point in Fig 7's
+  N=8 distribution — much narrower than Fig 2's N=48-72, so the "median of
+  8 recordings vs paper mean-of-8" gate should tighten accordingly.
 - Absolute-magnitude paper cross-check requires the paper's
   `benchmark-lossless-preprocessing.csv` (Code Ocean capsule
   `AllenNeuralDynamics/aind-capsule-ephys-compression-results` data asset;

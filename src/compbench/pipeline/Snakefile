@@ -65,9 +65,40 @@ def _cell_dir(cell_id: str) -> str:
 
 
 rule all:
-    """Terminal target — produces the aggregated report."""
+    """Terminal target — every cell attempts, aggregation runs post-hook.
+
+    We depend on the per-cell metrics rather than on `report.parquet`
+    because report.parquet needs to be produced AFTER all cells attempt
+    (whether they succeed or fail with --keep-going). The `onsuccess` and
+    `onerror` handlers below run the aggregator unconditionally at the end,
+    so a partial sweep still yields the report on whatever cells landed.
+    """
     input:
-        RESULTS_DIR / "report.parquet",
+        [RESULTS_DIR / c.cell_id / "metrics.json" for c in CELLS],
+
+
+onsuccess:
+    shell(
+        r"compbench report --results-dir {RESULTS_DIR} --output "
+        r"{RESULTS_DIR}/report.parquet && "
+        r"compbench render-report --parquet {RESULTS_DIR}/report.parquet "
+        r"--output {RESULTS_DIR}/AUTO_TABLE.md "
+        r"--title 'Sweep report' --source-note 'Auto-rendered post-sweep.'"
+    )
+
+
+onerror:
+    # Aggregate whatever succeeded before the failure — useful when
+    # --keep-going lets N-1 cells complete but one hard-fails.
+    shell(
+        r"compbench report --results-dir {RESULTS_DIR} --output "
+        r"{RESULTS_DIR}/report.parquet 2>/dev/null || true; "
+        r"compbench render-report --parquet {RESULTS_DIR}/report.parquet "
+        r"--output {RESULTS_DIR}/AUTO_TABLE.md "
+        r"--title 'Sweep report (partial)' "
+        r"--source-note 'One or more cells failed; report contains successful cells only.' "
+        r"2>/dev/null || true"
+    )
 
 
 rule run_cell:
@@ -110,13 +141,9 @@ rule run_cell:
         """
 
 
-rule aggregate:
-    """Collect all cells into a single Parquet report."""
-    input:
-        [RESULTS_DIR / c.cell_id / "metrics.json" for c in CELLS],
-    output:
-        RESULTS_DIR / "report.parquet",
-    shell:
-        r"""
-        compbench report --results-dir {RESULTS_DIR} --output {output}
-        """
+# Note: `rule aggregate` is deliberately absent. Aggregation runs as
+# `onsuccess`/`onerror` above so it fires exactly once at the end of a
+# sweep, after every cell has been attempted, regardless of whether
+# --keep-going swallowed some failures. If you want to aggregate ad-hoc
+# outside a sweep, invoke `compbench report` + `compbench render-report`
+# directly — see DEPLOY.md §5.

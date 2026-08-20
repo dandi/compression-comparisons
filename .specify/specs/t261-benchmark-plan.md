@@ -84,7 +84,7 @@ Encoder self-reports `bits/sample 1.39`, `SNR inf dB`, `PRD 0.000%`; decoder con
 
 **Process-level globals** (four of them, all in `CommonLib`) — `g_cfg`, `g_logStream`, `g_retVal`, `g_traceCABAC`. `g_cfg` is the concerning one: it is set at the start of each encode/decode and read from the transform core. Consequence for the wrapper: hold a per-codec-instance mutex around each encode/decode; document that a single `T261` codec instance is not thread-safe. This is acceptable for the Zarr / numcodecs contract (single-threaded per instance), and Python's GIL serialises calls anyway.
 
-**Config-file centrality.** `EncAppCfg` parses `.cfg` files (or command-line key=value pairs) and threads through all codec state. Wrapper strategy: accept codec parameters as a dict, serialise to the existing key=value format, parse once at `Codec.__init__`, keep the parsed `EncAppCfg`/`DecAppCfg` as opaque handles inside the pybind11 class. 24 stock configs under `cfg/` cover ECG/EEG/EMG in lossy/lossless × combined/independent-channel variants — those become the starting `configs/codecs/t261-*.yaml` presets.
+**Config-file centrality.** `EncAppCfg` parses `.cfg` files (or command-line key=value pairs) and threads through all codec state. Wrapper strategy: accept codec parameters as a dict, serialise to the existing key=value format, parse once at `Codec.__init__`, keep the parsed `EncAppCfg`/`DecAppCfg` as opaque handles inside the pybind11 class. 23 stock `.cfg` presets under `cfg/` cover ECG/EEG/EMG in lossy/lossless × combined/independent-channel variants — those become the starting `configs/codecs/t261-*.yaml` presets.
 
 **`manylinux` prospects: excellent.** No Qt, no X11, no downloaded data, no hard-coded paths. GCC ≥ 10 or Clang ≥ 12; SIMD is optional (`-DENABLE_SIMD=OFF`) so a portable fallback wheel is possible. `cibuildwheel` on `manylinux_2_28` should work with only the `-Wno-restrict` flag.
 
@@ -387,7 +387,7 @@ Concrete steps:
 - Package `t261-numcodecs`: `pyproject.toml` with `scikit-build-core` backend; require `cmake>=3.15`, `pybind11`, `numpy`; ship `-DCMAKE_CXX_FLAGS="-Wno-restrict"` in the build config so GCC 12 wheels build.
 - **Binding:** `pybind11` (not cffi — codebase is C++20 through-and-through, and pybind11 handles the numpy-int16 buffer protocol directly).
 - **Threading contract:** hold a per-codec-instance `std::mutex` around each encode/decode call to serialise access to the `g_cfg` / `g_logStream` process-globals; document that a single `T261` codec instance is not thread-safe (Python GIL makes this a non-issue in normal use).
-- Seed `configs/codecs/t261-*.yaml` from the 24 stock configs under `src/bwc/cfg/`.
+- Seed `configs/codecs/t261-*.yaml` from the 23 stock `.cfg` presets under `src/bwc/cfg/`.
 - Produce a `manylinux_2_28_x86_64` wheel via `cibuildwheel`; publish to TestPyPI first, then PyPI.
 - Register the `numcodecs` entry point → `compbench list-codecs` shows `t261` after install with no benchmark-side edits.
 - Optional friendly upstream contribution: a ~50-line refactor exposing a flat `encode_buffer()` function in `EncLib`, plus the `-Wno-restrict` fix. Land after our own wrapper is working, not before.

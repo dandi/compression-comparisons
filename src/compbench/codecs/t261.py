@@ -366,12 +366,19 @@ if _AVAILABLE:
             return info
 
 
-def _bwc_git_sha() -> str | None:
-    """Try to resolve the git SHA of the BWC checkout that produced ENCODER.
+_BWC_SHA_CACHE: str | None = None
 
-    Falls back to None on any failure — never raises. Called at manifest-build
-    time; slow-path acceptable (one `git rev-parse` per encode is negligible).
+
+def _bwc_git_sha() -> str | None:
+    """Resolve the git SHA of the BWC checkout that produced ENCODER.
+
+    Cached at process level — the SHA doesn't change during a sweep, and
+    at 336 T.261-heavy cells one `git rev-parse` each is otherwise ~1 s of
+    pointless fork/exec (round-2 R4-M2 symmetry with _BWC_VERSION_CACHE).
     """
+    global _BWC_SHA_CACHE
+    if _BWC_SHA_CACHE is not None:
+        return _BWC_SHA_CACHE
     if ENCODER is None:
         return None
     # ENCODER is typically <bwc_root>/bin/release/EncoderApp → parent[2] = bwc root
@@ -383,7 +390,8 @@ def _bwc_git_sha() -> str | None:
             text=True,
             timeout=3,
         )
-        return out.strip() or None
+        _BWC_SHA_CACHE = out.strip() or None
+        return _BWC_SHA_CACHE
     except (subprocess.SubprocessError, FileNotFoundError, IndexError):
         return None
 

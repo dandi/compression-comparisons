@@ -47,41 +47,45 @@ pipx install uv
 
 ### 1. Clone the study, the tool, and the source data
 
-**IMPORTANT — study is not yet on a public remote.** The instructions
-below assume the study lives at `<study-remote>` on GitHub or a
-DataLad-mirrored host. Until that push happens, use §1a below to sync
-from Yaroslav's dev machine (rsync/scp/datalad-siblings) or from a
-sibling `dandi/compression-comparisons` GitHub repo for the tool
-code + `///aind-benchmark-data/ephys-compression` for source data.
+**Study repo is not yet on a public remote.** Skip to §1a for the
+current transfer recipe. When the study is pushed to GitHub / a DataLad
+mirror, §1b below is the future-canonical form (kept here so the
+one-command intent is documented).
+
+### 1a. Current: sync from Yaroslav's dev machine
 
 ```bash
-# The STAMPED study (top-level, tiny). --recursive registers subdatasets;
-# annexed files are NOT pulled yet.
-datalad clone --recursive <study-remote> dandi-t261-compression-study
-cd dandi-t261-compression-study
+# On the dev machine (study at ~/proj/dandi/compression-comparisons/results/dandi-t261-compression-study):
+tar czf /tmp/study.tar.gz -C ~/proj/dandi/compression-comparisons/results dandi-t261-compression-study
 
-# Pull the raw ephys data (this is the slow step — 100s of GB).
-# Everything at once:
-datalad -C sourcedata/aind-ephys-compression get .
-# OR a subset (recommended for first run):
+# On the target machine:
+scp yaroslav@dev:/tmp/study.tar.gz . && tar xzf study.tar.gz && cd dandi-t261-compression-study
+
+# The tool-code submodule currently points at a local absolute path — fix
+# to the GitHub URL (when the tool repo is pushed) or another host you have:
+git -c protocol.file.allow=always submodule sync
+git config submodule.code/compression-comparisons-tools.url https://github.com/dandi/compression-comparisons
+datalad get -r code/compression-comparisons-tools
+
+# sourcedata subdataset points at ///aind-benchmark-data/ephys-compression (public):
+datalad get sourcedata/aind-ephys-compression   # registers; files still annexed
 datalad -C sourcedata/aind-ephys-compression get \
     ibl-np1/CSHZAD026_2020-09-04_probe00/traces_cached_seg0.raw   # ~28 GB, one recording
 ```
 
-### 1a. Sync from Yaroslav's dev machine (until the study has a remote)
+### 1b. Future canonical (once the study is pushed)
 
 ```bash
-# On the dev machine (assuming study is at ~/proj/dandi/compression-comparisons/results/dandi-t261-compression-study):
-tar czf /tmp/study.tar.gz -C ~/proj/dandi/compression-comparisons/results dandi-t261-compression-study
-# On the target machine:
-scp yaroslav@dev:/tmp/study.tar.gz . && tar xzf study.tar.gz && cd dandi-t261-compression-study
-# The tool code subdataset's .gitmodules currently points at a local absolute path — fix it:
-git config -f .gitmodules submodule.code/compression-comparisons-tools.url https://github.com/dandi/compression-comparisons
-git submodule sync
-datalad get -r code/compression-comparisons-tools
-# sourcedata subdataset still points at ///aind-benchmark-data/ephys-compression — works out of the box.
-datalad get -r sourcedata/aind-ephys-compression   # registers only; files still annexed
-datalad -C sourcedata/aind-ephys-compression get ibl-np1/CSHZAD026_2020-09-04_probe00/traces_cached_seg0.raw
+# --recursive registers subdatasets; annexed files are NOT pulled yet.
+datalad clone --recursive <study-remote> dandi-t261-compression-study
+cd dandi-t261-compression-study
+
+# Pull raw ephys data — slow step. Subset first:
+datalad -C sourcedata/aind-ephys-compression get \
+    ibl-np1/CSHZAD026_2020-09-04_probe00/traces_cached_seg0.raw
+
+# Or everything:
+datalad -C sourcedata/aind-ephys-compression get .
 ```
 
 ### 2. Build the container image

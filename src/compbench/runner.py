@@ -85,25 +85,38 @@ def run_cell(
     reconstructed, dec_dt = decode(encoded, adapter, template=ds.data)
 
     cr = metrics.compression_ratio(ds.nbytes, len(encoded))
-    err = metrics.rmse(ds.data, reconstructed)
-    prd_val = metrics.prd(ds.data, reconstructed)
-    prdn_val = metrics.prdn(ds.data, reconstructed)
-    # Band-limited RMSE (Buccino Fig 4-6 methodology) — the spike-band
-    # distortion metric. Only meaningful if the sample rate is high enough
-    # to have a 300-6000 Hz band; skip on low-rate signals (e.g. synthetic
-    # 1 kHz test data would fail Nyquist).
-    band_rmse: float | None = None
-    if ds.sample_rate_hz > 12000.0:
-        try:
-            band_rmse = metrics.rmse_band_limited(
-                ds.data, reconstructed, ds.sample_rate_hz, 300.0, 6000.0
-            )
-        except (ValueError, ImportError):
-            band_rmse = None
     exact = metrics.round_trip_ok(ds.data, reconstructed)
-    # Signal RMS (input scale) — needed to interpret RMSE in signal units
-    # ("PRDN via signal std" per R1 review). Compute once per cell.
-    signal_std = float(np.std(ds.data.astype(np.float64))) if ds.data.size else 0.0
+
+    # Precompute the float64 promotions once and pass to every metric.
+    # Before this consolidation each metric independently promoted `ds.data`
+    # to float64 → 4-5x redundant allocation per cell (~1 GB on 230 MB int16
+    # input). Now: two arrays, shared across all metrics.
+    if exact:
+        # Lossless round-trip → every distortion metric is analytically zero;
+        # skip the multi-second filtfilt / dot-product ceremony. This alone
+        # saves ~20s/cell for the majority of paper-comparable cells.
+        err = 0.0
+        prd_val = 0.0
+        prdn_val = 0.0
+        band_rmse: float | None = 0.0 if ds.sample_rate_hz > 12000.0 else None
+        signal_std = float(np.std(ds.data.astype(np.float64))) if ds.data.size else 0.0
+    else:
+        orig64 = ds.data.astype(np.float64)
+        recon64 = reconstructed.astype(np.float64)
+        err = metrics.rmse(orig64, recon64)
+        prd_val = metrics.prd(orig64, recon64)
+        prdn_val = metrics.prdn(orig64, recon64)
+        signal_std = float(np.std(orig64)) if orig64.size else 0.0
+        # Band-limited RMSE (Buccino Fig 4-6 methodology). Nyquist gate:
+        # need sample_rate > 2 * high_hz to bandpass at 300-6000 Hz.
+        band_rmse = None
+        if ds.sample_rate_hz > 12000.0:
+            try:
+                band_rmse = metrics.rmse_band_limited(
+                    orig64, recon64, ds.sample_rate_hz, 300.0, 6000.0
+                )
+            except ValueError:
+                band_rmse = None
 
     duration = ds.duration_s
     result_metrics = {
@@ -122,7 +135,9 @@ def run_cell(
         "rmse_over_signal_std_percent": (100.0 * err / signal_std) if signal_std > 0 else 0.0,
         "round_trip_ok": exact,
         "expected_lossless": not adapter.lossy,
-        "lossless_violation": (not adapter.lossy) is False and exact is False,
+        # Correctness alarm: declared-lossless codec produced non-exact output.
+        # (Round-2 R4-REG1 fixed inverted logic here.)
+        "lossless_violation": (not adapter.lossy) and (not exact),
     }
 
     manifest = build_manifest(

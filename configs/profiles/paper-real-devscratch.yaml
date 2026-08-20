@@ -13,13 +13,9 @@
 
 name: paper-real
 datasets:
-  # Canonical: STAMPED-study-relative path (`sourcedata/aind-ephys-compression/...`).
-  # Run this profile from the STAMPED study root; the -sourcedata YAML resolves
-  # relative to that CWD. For local dev without the STAMPED study,
-  # `configs/profiles/paper-real-devscratch.yaml` points at the local
-  # `results/scratch-real-ephys-CSHZAD026-partial` snapshot.
-  # Band-pass filtered — matches paper's Fig 7 preprocessing.
-  - configs/datasets/aind-ibl-np1-CSHZAD026-slice10s-bp-sourcedata.yaml
+  # Band-pass filtered — matches Buccino et al. Fig 2 preprocessing.
+  # Swap for `-slice10s.yaml` (no preprocessing) for the raw baseline.
+  - configs/datasets/aind-ibl-np1-CSHZAD026-slice10s-bp.yaml
 
 codecs:
   # blosc family — full Fig 2 axis.

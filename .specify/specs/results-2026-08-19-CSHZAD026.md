@@ -49,10 +49,11 @@ is beyond what the subprocess stopgap can bound cheaply).
    requires Kilosort-agreement + waveform-features eval (Phase 3 metrics
    in the plan).
 
-3. **T.261 QP=8 hits CR 16.8** — 7 × better than the best general-purpose
-   lossless, at RMSE 2.4 counts / PRDN ≈ 12 % of signal RMS. Likely
-   severe degradation of small-amplitude spikes; downstream
-   spike-sorting-fidelity evaluation required before use.
+3. **T.261 QP=8 hits CR 16.8** — 6.4 × better than the best general-purpose
+   lossless (lzma at 2.61), at RMSE 2.4 counts / PRDN ≈ 12 % of signal RMS
+   pooled (~37 % on the median per-channel std of 6.6). Likely severe
+   degradation of small-amplitude spikes; downstream spike-sorting-fidelity
+   evaluation required before use.
 
 4. **T.261 encode is 50 × slower than real-time** across every QP config on
    this subprocess-wrapper stopgap. Phase 2b's pybind11 in-process wrapper
