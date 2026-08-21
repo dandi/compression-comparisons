@@ -30,41 +30,72 @@ from typing import Any
 
 
 def gt_comparison_metrics(
-    ground_truth: Any,  # spikeinterface SortingExtractor
-    candidate: Any,  # spikeinterface SortingExtractor
+    ground_truth: Any,  # spikeinterface SortingExtractor (MEArec ground truth)
+    candidate: Any,  # spikeinterface SortingExtractor (sorted lossy traces)
     exhaustive_gt: bool = True,
     delta_time_ms: float = 0.4,
     match_score: float = 0.5,
+    well_detected_score: float = 0.8,
+    redundant_score: float = 0.2,
+    overmerged_score: float = 0.2,
+    chance_score: float = 0.1,
 ) -> dict[str, Any]:
-    """Per-GT-unit accuracy / precision / recall (paper §3.2.2 Fig 10).
+    """Ground-truth comparison — paper Figs 10 and 11.
 
-    Uses `spikeinterface.comparison.GroundTruthComparison`. On simulated
-    MEArec data the paper reports distributions across all 100 GT units;
-    we return per-unit metrics + summary statistics (mean, std, min, max,
-    median) so a downstream aggregator can produce distribution plots.
+    Thin, deliberate wrapper over
+    `spikeinterface.comparison.compare_sorter_to_ground_truth`. Every
+    threshold is a SpikeInterface default, but each is passed explicitly
+    and echoed back in the result: a unit count is not interpretable
+    without the scores that produced it, and defaults change between
+    versions.
 
-    Args:
-        ground_truth: SortingExtractor with true spike times/labels (from
-            `compbench.datasets.mearec.load_ground_truth()`).
-        candidate: SortingExtractor from Kilosort on the lossy-decoded traces.
-        exhaustive_gt: True for MEArec — every candidate spike SHOULD match
-            a GT spike. False for experimental data.
-        delta_time_ms: spike-time tolerance for a match (paper: unspecified;
-            SpikeInterface default 0.4 ms).
-        match_score: minimum accuracy for a unit to count as "matched".
+    Returns both the pooled averages (the paper's Fig-10 quantity) and the
+    **per-unit** table. The paper only published the pooled scalar, but
+    keeping the 100-unit distribution is what lets us answer *which* units
+    broke rather than "the mean moved 0.2 %" — and the paper's own Fig 11
+    is the demonstration that a pooled mean hides the failure: at NP1
+    bit-truncation 5 the mean accuracy is "only slightly affected" while
+    false positives go 65 -> 1435 (52 at lossless).
 
-    Returns:
-        {
-          "n_gt_units": int,
-          "n_candidate_units": int,
-          "per_unit": [{"gt_unit_id": ..., "accuracy": ..., "precision": ..., "recall": ...}, ...],
-          "accuracy_mean": float, "accuracy_std": float, "accuracy_median": float,
-          "precision_mean": float, ..., "recall_mean": float, ...,
-          "unit_counts": {"well_detected": int, "false_positive": int,
-                          "redundant": int, "overmerged": int},
-        }
+    Verified against the authors' released sortings: all 32 simulated cells
+    reproduce `benchmark-lossy-sim.csv` exactly under SpikeInterface
+    0.104.8, including that 65 -> 1435 transition.
     """
-    raise NotImplementedError("Phase 3.5 R1-H3 — implementation pending")
+    import spikeinterface.comparison as sc
+
+    cmp = sc.compare_sorter_to_ground_truth(
+        ground_truth,
+        candidate,
+        exhaustive_gt=exhaustive_gt,
+        delta_time=delta_time_ms,
+        match_score=match_score,
+        well_detected_score=well_detected_score,
+        redundant_score=redundant_score,
+        overmerged_score=overmerged_score,
+        chance_score=chance_score,
+    )
+    pooled = cmp.get_performance(method="pooled_with_average", output="dict")
+    per_unit = cmp.get_performance(method="by_unit")
+    counts = {str(k): int(v) for k, v in cmp.count_units_categories().items()}
+
+    return {
+        "pooled": {k: float(v) for k, v in pooled.items()},
+        "per_unit": per_unit.reset_index().to_dict(orient="records"),
+        "unit_counts": counts,
+        "n_gt_units": len(ground_truth.unit_ids),
+        "n_candidate_units": len(candidate.unit_ids),
+        # Echoed so a count is never read without the scores behind it.
+        "comparison_params": {
+            "exhaustive_gt": exhaustive_gt,
+            "delta_time_ms": delta_time_ms,
+            "match_score": match_score,
+            "well_detected_score": well_detected_score,
+            "redundant_score": redundant_score,
+            "overmerged_score": overmerged_score,
+            "chance_score": chance_score,
+            "match_mode": "hungarian",
+        },
+    }
 
 
 def sorting_agreement(
@@ -202,10 +233,11 @@ def unit_classification(
     number is not interpretable without them.
 
     `num_false_positive` is the endpoint that actually moves: on the
-    paper's own data it goes 52 -> 1435 between bit-truncation 4 and 5,
-    while mean accuracy barely shifts.
+    paper's own data it goes 65 -> 1435 between bit-truncation 4 and 5 (52
+    at lossless) -- a 22x rise -- while mean accuracy falls only 7 %.
     """
-    raise NotImplementedError("Phase 3.5 R1-H3 — implementation pending")
+    counts = comparison.count_units_categories()
+    return {str(k): int(v) for k, v in counts.items()}
 
 
 def qc_pass_fraction(

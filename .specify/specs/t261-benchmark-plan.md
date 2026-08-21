@@ -626,7 +626,7 @@ Concrete steps:
   drop 0.9981 -> 0.9268 (-7.1 %), so a 5 % accuracy gate would *fail* it —
   the paper's own prose ("only slightly affected") is contradicted by its
   own released numbers. But the failure is far more visible in the unit
-  counts: false positives go **52 -> 1435** while `num_well_detected` only
+  counts: false positives go **65 -> 1435** (52 at lossless) while `num_well_detected` only
   drops 100 -> 90. And the gate is still the wrong instrument: at
   bit-truncation *4* (CR 29.9, RMSE 4.70) accuracy holds at 0.9979 and a
   5 % gate passes, yet false positives are already rising. A scalar

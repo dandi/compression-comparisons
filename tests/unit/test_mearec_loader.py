@@ -27,26 +27,18 @@ def test_mearec_missing_file(tmp_path: Path) -> None:
 
 
 @pytest.mark.ai_generated
-def test_mearec_metric_skeleton_stubs_raise() -> None:
-    """Every sorting-metric skeleton raises until Phase 3.5 is implemented.
+def test_unimplemented_sorting_metrics_still_raise() -> None:
+    """Tracks which parts of the sorting contract are still skeletons.
 
-    Arity differs per function, so they are called with the right number of
-    positional arguments — `unit_classification` takes a single comparison
-    object (it delegates to SpikeInterface's `count_units_categories`), not
-    a baseline/candidate pair.
+    `gt_comparison_metrics` and `unit_classification` are implemented and
+    verified against the paper's own released sortings
+    (tests/unit/test_sorting_golden_replay.py); they are deliberately not
+    listed here. The rest still raise, and this test fails loudly when one
+    of them lands, so the list cannot silently go stale.
     """
     from compbench.metrics import sorting
 
-    one_arg = (sorting.unit_classification,)
-    two_args = (
-        sorting.gt_comparison_metrics,
-        sorting.sorting_agreement,
-        sorting.qc_pass_fraction,
-        sorting.excess_spikes,
-    )
-    for fn in one_arg:
-        with pytest.raises(NotImplementedError, match=r"Phase 3\.5"):
-            fn(None)  # type: ignore[arg-type]
+    two_args = (sorting.sorting_agreement, sorting.qc_pass_fraction, sorting.excess_spikes)
     for fn in two_args:
         with pytest.raises(NotImplementedError, match=r"Phase 3\.5"):
             fn(None, None)  # type: ignore[arg-type]
@@ -54,6 +46,15 @@ def test_mearec_metric_skeleton_stubs_raise() -> None:
         sorting.run_to_run_floor([None, None])  # type: ignore[list-item]
     with pytest.raises(NotImplementedError, match=r"Phase 3\.5"):
         sorting.waveform_feature_errors(None, None, None)  # type: ignore[arg-type]
+
+
+@pytest.mark.ai_generated
+def test_implemented_sorting_metrics_are_callable() -> None:
+    """The complement: these are no longer stubs."""
+    from compbench.metrics import sorting
+
+    for fn in (sorting.gt_comparison_metrics, sorting.unit_classification):
+        assert "NotImplementedError" not in (fn.__doc__ or "")
 
 
 @pytest.mark.ai_generated
