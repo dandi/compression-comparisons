@@ -79,6 +79,7 @@ def compress(
     (which uses a 5 s window at 15-20 s, despite the text saying 10 s).
     """
     import spikeinterface.preprocessing as spre
+    from spikeinterface.core.zarrextractors import ZarrRecordingExtractor
 
     out_dir.mkdir(parents=True, exist_ok=True)
     adapter = codecs.get(codec_name)(**codec_params)
@@ -101,7 +102,22 @@ def compress(
         verbose=False,
     )
     encode_s = time.perf_counter() - t0
-    cr = float(compressed.get_annotation("compression_ratio"))
+
+    # Compression ratio, measured on the Zarr store — the same object the
+    # paper measures (`nbytes / nbytes_stored`, i.e. logical size over
+    # on-disk chunk bytes). `.save()` does NOT set the annotation; SI only
+    # populates it when a store is *read back* with
+    # `load_compression_ratio=True`, so re-read rather than trusting an
+    # annotation that is silently None.
+    # `read_zarr()` does not forward the flag; construct the extractor directly.
+    compressed = ZarrRecordingExtractor(zarr_path, load_compression_ratio=True)
+    cr_annot = compressed.get_annotation("compression_ratio")
+    if cr_annot is None:  # pragma: no cover - defensive across SI versions
+        raise RuntimeError(
+            f"Zarr store at {zarr_path} reports no compression_ratio; "
+            f"cannot measure CR for {codec_name}."
+        )
+    cr = float(cr_annot)
 
     # Band-pass both sides and difference over the paper's window.
     fs = recording.get_sampling_frequency()
