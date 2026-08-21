@@ -268,3 +268,111 @@ def render_report(parquet_path: str, output_path: str, title: str, source_note: 
 
 if __name__ == "__main__":
     main()
+
+
+# ---------------------------------------------------------------------------
+# Lossy-vs-sorting pipeline (plan §4.6c). Three commands, not one, so that a
+# sorter change does not force a recompress and a threshold change does not
+# force a re-sort. Each writes a durable artifact the next consumes, which is
+# also what makes each one a clean `datalad run` unit.
+# ---------------------------------------------------------------------------
+
+
+@main.command("compress")
+@click.option("--mearec", "mearec_path", required=True, type=click.Path(exists=True))
+@click.option("--lsb", type=int, default=None, help="LSB to correct (NP1: 12, NP2: 3).")
+@click.option("--start-s", type=float, default=0.0)
+@click.option("--duration-s", type=float, default=None)
+@click.option("--codec", "codec_name", required=True)
+@click.option("--codec-params", default="")
+@click.option("--chunk-duration-s", type=float, default=1.0)
+@click.option("--n-jobs", type=int, default=1)
+@click.option("--output-dir", required=True, type=click.Path(file_okay=False))
+def compress_cmd(
+    mearec_path: str,
+    lsb: int | None,
+    start_s: float,
+    duration_s: float | None,
+    codec_name: str,
+    codec_params: str,
+    chunk_duration_s: float,
+    n_jobs: int,
+    output_dir: str,
+) -> None:
+    """Stage 1 — compress a recording to Zarr and measure distortion."""
+    from compbench.datasets.mearec import load_recording
+    from compbench.sorting_pipeline import compress
+
+    rec, _ = load_recording(mearec_path, start_s=start_s, duration_s=duration_s, lsb=lsb)
+    m = compress(
+        rec,
+        codec_name,
+        _parse_codec_params(codec_params),
+        Path(output_dir),
+        chunk_duration_s=chunk_duration_s,
+        n_jobs=n_jobs,
+    )
+    click.echo(
+        f"cr={m['cr']:.3f} rmse_uv={m['rmse_uv']:.4f} "
+        f"exact={m['round_trip_exact']} violation={m['lossless_violation']}"
+    )
+    if m["lossless_violation"]:
+        click.echo("ERROR: codec declared lossless but round-trip was not exact.", err=True)
+        sys.exit(2)
+
+
+@main.command("spikesort")
+@click.option("--zarr", "zarr_path", required=True, type=click.Path(exists=True))
+@click.option("--sorter", default="kilosort4")
+@click.option("--output-dir", required=True, type=click.Path(file_okay=False))
+@click.option("--n-jobs", type=int, default=1)
+@click.option(
+    "--common-reference/--no-common-reference",
+    default=False,
+    help="Paper applies CMR to experimental data only, never to the GT path.",
+)
+def spikesort_cmd(
+    zarr_path: str, sorter: str, output_dir: str, n_jobs: int, common_reference: bool
+) -> None:
+    """Stage 2 — sort a stored recording."""
+    from compbench.sorting_pipeline import spikesort
+
+    info = spikesort(
+        Path(zarr_path),
+        Path(output_dir),
+        sorter=sorter,
+        common_reference=common_reference,
+        n_jobs=n_jobs,
+    )
+    click.echo(
+        f"sorter={info['sorter']}/{info['sorter_version']} "
+        f"units={info['n_units']} spikes={info['n_spikes']} sort_s={info['sort_s']:.1f}"
+    )
+
+
+@main.command("compare-sorting")
+@click.option("--sorting", "sorting_path", required=True, type=click.Path(exists=True))
+@click.option("--mearec", "mearec_path", required=True, type=click.Path(exists=True))
+@click.option("--start-s", type=float, default=0.0)
+@click.option("--duration-s", type=float, default=None)
+@click.option("--output-dir", required=True, type=click.Path(file_okay=False))
+def compare_sorting_cmd(
+    sorting_path: str,
+    mearec_path: str,
+    start_s: float,
+    duration_s: float | None,
+    output_dir: str,
+) -> None:
+    """Stage 3 — compare a stored sorting against ground truth."""
+    from compbench.datasets.mearec import load_recording
+    from compbench.sorting_pipeline import compare_to_ground_truth
+
+    # lsb is irrelevant here: only the ground-truth spike trains are used.
+    _, gt = load_recording(mearec_path, start_s=start_s, duration_s=duration_s)
+    r = compare_to_ground_truth(Path(sorting_path), gt, Path(output_dir))
+    p, c = r["pooled"], r["unit_counts"]
+    click.echo(
+        f"accuracy={p['accuracy']:.4f} precision={p['precision']:.4f} "
+        f"recall={p['recall']:.4f} well_detected={c['num_well_detected']} "
+        f"false_positive={c['num_false_positive']}"
+    )

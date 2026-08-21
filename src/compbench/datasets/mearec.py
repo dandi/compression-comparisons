@@ -96,3 +96,58 @@ def load_ground_truth(path: str | Path) -> Any:
         raise ImportError("read_mearec unavailable; install ephys extras.")
     _, sorting = _read_mearec(str(path))
     return sorting
+
+
+def load_recording(
+    path: str | Path,
+    start_s: float = 0.0,
+    duration_s: float | None = None,
+    lsb: int | None = None,
+) -> tuple[Any, Any]:
+    """SpikeInterface-native view: ``(recording, ground_truth_sorting)``.
+
+    Unlike `load_mearec`, which returns a bare array, this keeps the probe,
+    the channel locations and the **gains** — all of which the sorting
+    pipeline needs and `LoadedDataset` discards. The gains are the
+    load-bearing part: `correct_lsb` divides the samples by the LSB and
+    multiplies the gains to compensate, so a pipeline that drops gains
+    reports everything in uV a factor of `lsb` too small — 12x on NP1, 3x
+    on NP2.
+
+    `lsb` applies the paper's correction (Table 1: MEArec_NP1 12, NP2 3),
+    which its simulated driver applies unconditionally before compressing.
+    Without it, bit truncation discards bits that carry no information and
+    `bittrunc-N` is not the paper's `bit_truncation-N`.
+
+    Medians are taken over the whole slice rather than SpikeInterface's 20
+    random chunks: the paper's own call seeds them randomly, so its LSB
+    correction is not reproducible run to run. Ours is. The two differ on
+    ~7.5 % of samples by exactly one count, a per-channel DC offset that
+    the 300-6000 Hz band-pass removes entirely.
+    """
+    import spikeinterface.extractors as se
+    import spikeinterface.preprocessing as spre
+
+    rec, gt = se.read_mearec(str(path))
+    fs = rec.get_sampling_frequency()
+    if duration_s is not None:
+        a = int(start_s * fs)
+        b = min(a + int(duration_s * fs), rec.get_num_frames())
+        rec = rec.frame_slice(a, b)
+        gt = gt.frame_slice(a, b)
+    elif start_s:
+        rec = rec.frame_slice(int(start_s * fs), rec.get_num_frames())
+        gt = gt.frame_slice(int(start_s * fs), rec.get_num_frames())
+
+    if lsb is not None and int(lsb) > 1:
+        n = int(lsb)
+        dtype = rec.get_dtype()
+        medians = np.median(
+            rec.get_traces(start_frame=0, end_frame=min(int(10 * fs), rec.get_num_frames())),
+            axis=0,
+        )
+        rec = spre.scale(rec, gain=1.0, offset=-medians, dtype=dtype)
+        rec = spre.scale(rec, gain=1.0 / n, dtype=dtype)
+        if rec.has_scaleable_traces():
+            rec.set_channel_gains(rec.get_channel_gains() * n)
+    return rec, gt
