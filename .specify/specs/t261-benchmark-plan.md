@@ -363,6 +363,62 @@ The core scientific question is not "what's the compression ratio?" — the pape
 - (c) T.261 QP=X where X is the "sorting-transparent" boundary — the highest QP that stays within the paper's stated ~10 % waveform-feature error tolerance.
 - (d) Failure modes documented (which units are affected at higher QP; symmetric or biased?).
 
+### 4.6c Lossy-vs-sorting pipeline: three stages, three artifacts (2026-08-21)
+
+The sorting evaluation is **not** one command. It is three, each writing a
+durable artifact the next consumes:
+
+```
+  compbench compress    raw traces --LOSSY--> stored decompressed recording
+                        + CR, RMSE, band-limited RMSE, PRDN
+                             |
+  compbench spikesort        v  (sorter and its params are variables)
+                        stored recording -> stored sorting
+                             |
+  compbench compare-sorting  v  (comparison method is a variable)
+                        sorting + ground truth -> metrics
+```
+
+**Why not one command.** Each stage's inputs vary independently, and the
+expensive middle stage should never be repeated for a change in the cheap
+one:
+
+- *Compression is the variable under study* and costs real time (a
+  full-length T.261 cell is 13-19 h). Its output must be stored, not
+  recomputed, so that a sorter change does not re-run it.
+- *Sorting is expensive and plural.* Kilosort 4 today, possibly Kilosort
+  2.5 (the paper's sorter) in a container later, possibly SpykingCircus2
+  for a robustness check. Each should be able to consume the same stored
+  recording.
+- *Comparison is cheap and will change.* Thresholds, `match_score`, curated
+  vs raw, which quantities we report — all still moving. Re-deriving
+  metrics from stored sortings must not require re-sorting, let alone
+  re-compressing.
+
+A monolithic `sort-sim` would have forced a full recompress every time we
+changed a comparison threshold. It also would have hidden the artifact
+that most needs inspecting: the decompressed traces themselves.
+
+**Storage format.** Stage 1 writes a **Zarr store**, which is what the
+paper compresses into, so the compression ratio is measured on the same
+object the paper measured. It also keeps probe geometry, channel
+locations and gains, which `LoadedDataset` discards — the gains matter
+because after LSB correction anything in uV is otherwise wrong by 12x
+(NP1) or 3x (NP2). `si.read_zarr()` turns it straight back into a
+sortable recording.
+
+**Independence.** Stage 1 is useful on its own and does not wait for
+stages 2-3: it produces the CR / RMSE / band-limited-RMSE / PRDN numbers
+for every lossy codec, which is a publishable result by itself and the
+input to the T.261 Pareto. Build and run it first.
+
+**But validate the whole loop on small simulated data before trusting
+any of it.** A short MEArec slice through compress -> sort -> compare,
+with a lossless codec (must show zero effect) and bit-truncation at a
+setting known to break, exercises every seam cheaply. Getting stage 1
+right and discovering at stage 3 that the stored recording lost its gains
+would waste days of compression.
+
 ### 4.6b Matching the paper's measurement conditions (added 2026-08-20)
 
 Reading the analysis capsule
