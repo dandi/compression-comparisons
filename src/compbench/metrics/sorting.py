@@ -1,27 +1,54 @@
 """Spike-sorting fidelity metrics — reflects Buccino et al. 2023 §3.2.2 exactly.
 
+**What this module is, and what it is not.** These functions consume spike
+trains. They do not produce them, and they do not compress anything. The
+experiment they serve runs like this:
+
+    raw traces (int16, ground truth known)
+      -> LSB correction
+      -> LOSSY compress          (bittrunc-N / wavpack-hybrid bps / T.261 QP)
+      -> decompress
+      -> CR, RMSE, band-limited RMSE, PRDN        [signal-level metrics]
+      -> band-pass
+      -> RUN THE SORTER ON THE DECOMPRESSED TRACES
+      -> compare that sorting against ground truth        [this module]
+
+The whole point is the effect of *lossy* compression on the spikes you get
+out. Lossless cells are the anchor — the reference the lossy arms are
+measured against, and a null check that a lossless codec changes nothing —
+not a result in themselves.
+
+Nothing here compresses a sorting. What gets compressed is always the raw
+traces.
+
 Two evaluation modes:
 
 1. **Against ground truth (simulated / MEArec data):** compute per-unit
-   accuracy / precision / recall via `SortingExtractor` ↔
+   accuracy / precision / recall via `SortingExtractor` <->
    `GroundTruthComparison`. Report distributions, unit-count classifications
    (well-detected / false-positive / redundant / overmerged).
 
 2. **Against lossless baseline (experimental data):** sort both the
    lossless-decoded output and the lossy-decoded output; compare via
    `compare_multiple_sorters(..., match_score=0.9)` and take the diagonal
-   of the ordered agreement matrix. (NOT `SymmetricSortingComparison` —
-   that was wrong here even after the function below was corrected.) Also apply the Siegle et al. 2021 automatic curation
+   of the ordered agreement matrix. (NOT `SymmetricSortingComparison` --
+   that was wrong here even after the function below was corrected.)
+
+   Also apply the Siegle et al. 2021 automatic curation
    (ISI-violations-ratio < 0.5, presence-ratio > 0.95, amplitude-cutoff < 0.1) and
    report passing/failing unit fractions.
 
 These metric functions do NOT run the sorter themselves — they consume
 `SortingExtractor` objects produced upstream by the sorting-eval pipeline
-(see plan §4.7). This keeps the metric layer independent of the sorter
-version + GPU availability.
+(see plan §4.6a). That keeps the metric layer independent of the sorter
+version and GPU availability, and it is why the two implemented functions
+could be verified against the authors' released sortings before any of the
+pipeline existed. It is emphatically NOT a claim that the experiment needs
+no sorter.
 
-Skeleton: full implementations land in Phase 3.5 [R1-H3]; the shapes below
-define the contract downstream code can rely on.
+Status: `gt_comparison_metrics` and `unit_classification` are implemented
+and verified; the rest are contract-only skeletons, and the pipeline that
+would feed them (compress -> decompress -> sort) is not built yet.
 """
 
 from __future__ import annotations
