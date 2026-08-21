@@ -838,6 +838,48 @@ this phase exists to remove.
      band-pass CR. If we adopt SOS it will be as a labelled condition
      with a before/after, not as a quiet improvement.
 
+7. **Reproduction cells MUST match the paper's operations exactly. Where
+   the paper used a library, call that library.** (Locked 2026-08-20.)
+
+   Every methodology defect this project has hit came from an operation
+   that *resembled* the paper's rather than *being* it — an order-4 `ba`
+   filter for their order-5 SOS, a whole-buffer filter for their chunked
+   one, a time delta for their flattened one, `lsb=1` meaning
+   median-removal instead of nothing, a 60 s slice for their full
+   recording. Each produced numbers that looked plausible and were not
+   comparable, and each was found only by accident.
+
+   The rule, in force for any cell intended to reproduce a published
+   figure:
+
+   - **No convenience slicing.** Use the recording the paper used, at its
+     full length. A slice is a different measurement: on band-passed data
+     a 60 s slice costs blosc-zstd **1.9 %** against the full recording,
+     which alone would consume most of the §5 gate budget.
+   - **Filtering, chunking, scaling and curation follow the paper's own
+     code**, not its prose — the two disagree in at least five places we
+     have found (§4.6b, and the `bandpass_300-15000` label that is really
+     500-14999 Hz).
+   - **Prefer delegation to reimplementation.** `preprocessing._bandpass`
+     now calls `spikeinterface.preprocessing.bandpass_filter` and
+     materialises it in the paper's chunks; verified **bit-identical** to
+     a real SpikeInterface `.save()` pipeline over 20 s x 384 channels.
+     Reimplementing it "carefully" is how we got an order-4 filter that
+     was wrong by up to 10 counts per sample and right to within 0.2 % on
+     CR — invisible to the metric we were checking.
+   - **A faster, non-matching variant may exist, but must be labelled and
+     may not back a reproduction claim.** `legacy-o4-ba` is retained only
+     so the three committed derivatives stay interpretable.
+   - **Anything that cannot be matched is recorded as a known deviation**
+     with its measured size, next to the number it affects — not left
+     implicit. Current list: FLAC `channel_chunk_size=2` (we chunk only
+     along time), WavPack 0.1.3-vs-0.2.3 hybrid flag semantics, Kilosort
+     4 in place of 2.5, and SI's `margin_ms` default (5 ms in the paper's
+     0.97.1, `auto` = 16.7 ms in 0.104.8).
+
+   This is the reproduction contract. Exploratory sweeps are free to do
+   whatever is cheap, and must say so.
+
 **Deferred (revisit when we have first results):**
 
 - Emailing Buccino/Siegle (Allen) with attribution note.

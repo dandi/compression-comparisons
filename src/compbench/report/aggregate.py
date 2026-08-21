@@ -65,6 +65,68 @@ def load_duct_info(path: Path) -> dict[str, Any]:
     }
 
 
+# Recordings in the AIND benchmark bucket, keyed by their folder name, with
+# the two facts every paper comparison needs to group by. Probe type and
+# source decide which reference rows a cell may be joined against, and they
+# are not derivable from anything else in the manifest.
+_RECORDING_META: dict[str, tuple[str, str]] = {
+    "CSHZAD026_2020-09-04_probe00": ("IBL", "NP1"),
+    "CSHZAD029_2020-09-09_probe00": ("IBL", "NP1"),
+    "SWC054_2020-10-05_probe00": ("IBL", "NP1"),
+    "SWC054_2020-10-05_probe01": ("IBL", "NP1"),
+    "625749_2022-08-03_15-15-06_ProbeA": ("AIND", "NP1"),
+    "634568_2022-08-05_15-59-46_ProbeA": ("AIND", "NP1"),
+    "634569_2022-08-09_16-14-38_ProbeA": ("AIND", "NP1"),
+    "634571_2022-08-04_14-27-05_ProbeA": ("AIND", "NP1"),
+    "595262_2022-02-21_15-18-07_ProbeA": ("AIND", "NP2"),
+    "602454_2022-03-22_16-30-03_ProbeB": ("AIND", "NP2"),
+    "612962_2022-04-13_19-18-04_ProbeB": ("AIND", "NP2"),
+    "612962_2022-04-14_17-17-10_ProbeC": ("AIND", "NP2"),
+    "618197_2022-06-21_14-08-06_ProbeC": ("AIND", "NP2"),
+    "618318_2022-04-13_14-59-07_ProbeB": ("AIND", "NP2"),
+    "618384_2022-04-14_15-11-00_ProbeB": ("AIND", "NP2"),
+    "621362_2022-07-14_11-19-36_ProbeA": ("AIND", "NP2"),
+    "mearec_NP1.h5": ("MEArec", "NP1"),
+    "mearec_NP2.h5": ("MEArec", "NP2"),
+}
+
+
+def _join_keys(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Columns that make a row joinable against the paper's own results.
+
+    The Phase 1 gate compares "(recording x codec x exactly-matched
+    config)". Until 2026-08-20 the only carrier of the config was the
+    `cell_dir` slug, so the gate was not mechanically evaluable and a
+    silent condition mismatch — the failure mode this project keeps
+    hitting — could not be detected by a join at all.
+
+    Every codec parameter becomes its own `codec_param_*` column, so a
+    filter or shuffle setting that changes the bytes without changing the
+    codec name is visible in the table rather than buried in a manifest.
+    """
+    codec = manifest.get("codec", {}) or {}
+    provenance = manifest.get("input", {}).get("provenance", {}) or {}
+    folder = (provenance.get("spikeinterface", {}) or {}).get("folder_name") or Path(
+        str((provenance.get("params", {}) or {}).get("path", ""))
+    ).name
+    source, probe = _RECORDING_META.get(folder, (None, None))
+
+    out: dict[str, Any] = {
+        "recording": folder or None,
+        "recording_source": source,
+        "probe": probe,
+        "codec_filters": json.dumps(codec.get("filters")) if codec.get("filters") else None,
+    }
+    for key, value in (codec.get("params") or {}).items():
+        out[f"codec_param_{key}"] = value
+    for key in ("blosc_nthreads", "wavpack_numcodecs_version", "bwc"):
+        if key in codec:
+            out[f"codec_{key}"] = (
+                json.dumps(codec[key]) if isinstance(codec[key], dict) else codec[key]
+            )
+    return out
+
+
 def _preprocessing_summary(manifest: dict[str, Any]) -> str:
     """One-line rendering of the preprocessing chain, e.g. `bandpass(300-6000Hz,o4)`.
 
@@ -142,6 +204,7 @@ def load_cell(cell_dir: Path) -> dict[str, Any] | None:
         "compbench_version": manifest.get("compbench_version"),
         "git_sha": manifest.get("git_sha"),
         "created_utc": manifest.get("created_utc"),
+        **_join_keys(manifest),
     }
 
     duct_info = _find_duct_info(cell_dir)

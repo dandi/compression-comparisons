@@ -102,9 +102,15 @@ datasets_matrix:
     - label: bp
       steps:
         - kind: bandpass
+          # Order 5 SOS via spikeinterface.preprocessing.bandpass_filter,
+          # materialised in 1 s chunks with margins — the paper's own
+          # operation, matched by delegation (plan §6 decision 7).
+          # Verified bit-identical to a real SpikeInterface .save().
           low_hz: 300
           high_hz: 6000
-          order: 4
+          order: 5
+          variant: spikeinterface
+          chunk_duration_s: 1.0
     - label: lsb
       # Skipped for SpikeGLX recordings: lsb=1 makes `correct_lsb` a no-op,
       # so this condition would be a byte-identical duplicate of `raw`.
@@ -119,9 +125,15 @@ datasets_matrix:
         - kind: lsb_correction
           lsb: "${lsb}"
         - kind: bandpass
+          # Order 5 SOS via spikeinterface.preprocessing.bandpass_filter,
+          # materialised in 1 s chunks with margins — the paper's own
+          # operation, matched by delegation (plan §6 decision 7).
+          # Verified bit-identical to a real SpikeInterface .save().
           low_hz: 300
           high_hz: 6000
-          order: 4
+          order: 5
+          variant: spikeinterface
+          chunk_duration_s: 1.0
 
 codecs:
   # ==========================================================================

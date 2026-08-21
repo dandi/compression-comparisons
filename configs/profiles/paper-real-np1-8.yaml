@@ -15,10 +15,15 @@
 # still reported. LSB correction and chunking are added conditions, not
 # replacements — the original AIND numbers are an absolute.
 #
-# WHY 8 RECORDINGS, 60 s: the Phase 1 gate (plan §5) is a median-of-8
-# against the paper's published median-of-8, so it needs breadth across
-# recordings, not length within one.
+# FULL RECORDINGS, NOT A SLICE (plan §6 decision 7). The paper compresses
+# each recording end to end; a slice is a different measurement. Measured:
+# on band-passed data a 60 s slice costs blosc-zstd 1.9% against the full
+# recording, which alone would consume most of the §5 gate budget.
 #
+# For cheap iteration use a separate exploratory profile and label it as
+# not paper-comparable — do not reintroduce `duration_s` here.
+#
+
 # Cell count: 8 recordings x 4 preprocessing x
 #   (18 paper codecs x 2 chunkings + 6 T.261 configs x 1 chunking)
 #   = 8 x 4 x 42 = 1344 cells.
@@ -43,7 +48,6 @@ datasets_matrix:
   loader: aind-benchmark
   params:
     start_s: 0.0
-    duration_s: 60.0
 
   recordings:
     # `vars.lsb` is the recording's least-significant bit, from the paper's
@@ -94,9 +98,15 @@ datasets_matrix:
     - label: bp
       steps:
         - kind: bandpass
+          # Order 5 SOS via spikeinterface.preprocessing.bandpass_filter,
+          # materialised in 1 s chunks with margins — the paper's own
+          # operation, matched by delegation (plan §6 decision 7).
+          # Verified bit-identical to a real SpikeInterface .save().
           low_hz: 300
           high_hz: 6000
-          order: 4
+          order: 5
+          variant: spikeinterface
+          chunk_duration_s: 1.0
     - label: lsb
       # Skipped for SpikeGLX recordings: lsb=1 makes `correct_lsb` a no-op,
       # so this condition would be a byte-identical duplicate of `raw`.
@@ -111,9 +121,15 @@ datasets_matrix:
         - kind: lsb_correction
           lsb: "${lsb}"
         - kind: bandpass
+          # Order 5 SOS via spikeinterface.preprocessing.bandpass_filter,
+          # materialised in 1 s chunks with margins — the paper's own
+          # operation, matched by delegation (plan §6 decision 7).
+          # Verified bit-identical to a real SpikeInterface .save().
           low_hz: 300
           high_hz: 6000
-          order: 4
+          order: 5
+          variant: spikeinterface
+          chunk_duration_s: 1.0
 
 codecs:
   # ==========================================================================
