@@ -1,7 +1,19 @@
-# `datalad run` concurrency: silent provenance corruption
+# `datalad run --explicit` concurrency: silent provenance corruption
 
 Findings from trying to give every benchmark cell its own `datalad run`
 record. Written up for an upstream report.
+
+> **Superseded.** This is the original working characterisation, kept for
+> the record. The filed reports are
+> `datalad-issue-run-explicit-concurrency.md` (the race) and
+> `datalad-issue-run-nested.md` (nesting), with runnable reproducers under
+> `repro/`. Two corrections since this was written:
+>
+> * Scope is `--explicit` only. Committing everything the command produced
+>   is by design without it, and this document's original headline was
+>   wrong to imply otherwise.
+> * The nested-run failure exits **1**, not 0, and only occurs when the
+>   outer run does not re-declare the inner runs' outputs.
 
 **Versions:** datalad 1.6.2 · git 2.47.3 · git-annex 10.20260717 ·
 Debian 13 (trixie), glibc 2.41, Python 3.13.5. Local filesystem (btrfs),
@@ -9,7 +21,7 @@ single host, no NFS.
 
 ## The headline
 
-Concurrent `datalad run` invocations in one dataset do not merely fail —
+Concurrent `datalad run --explicit` invocations in one dataset do not merely fail —
 **they can silently attribute one command's outputs to another command's
 run record, while reporting success and leaving a clean tree.**
 
@@ -20,7 +32,8 @@ confidently wrong.
 ## Minimal reproducer
 
 ```bash
-D=/var/tmp/dlc; rm -rf $D; datalad create -c text2git $D; cd $D
+cd "$(mktemp -d "${TMPDIR:-/tmp}/dlc-XXXXXXX")"
+datalad create -c text2git ds; cd ds
 for i in 1 2 3 4 5 6 7 8; do
   ( datalad run --explicit --output "o$i" -m "c$i" \
       "python3 -c \"open('o$i','w').write('x')\"" ) &

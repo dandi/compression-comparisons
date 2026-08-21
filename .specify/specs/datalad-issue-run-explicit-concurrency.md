@@ -1,6 +1,7 @@
-# ISSUE DRAFT — `datalad run --explicit`: concurrent runs commit each other's outputs and silently lose run records
+# ISSUE DRAFT 1 — `datalad run --explicit`: concurrent runs commit each other's outputs and silently lose run records
 
-*(Ready to file at github.com/datalad/datalad. Body below the line.)*
+*(Ready to file at github.com/datalad/datalad. Body below the line.
+Reproducer script: `.specify/specs/repro/datalad-run-explicit-concurrency.sh`)*
 
 ---
 
@@ -30,61 +31,83 @@ local btrfs filesystem, single host, no network filesystem
 
 ## Reproducer
 
-Two concurrent runs, each declaring exactly one distinct output:
+Takes the concurrency level as `$1`, default 2. Each run declares exactly
+one distinct output.
 
-```bash
-D=/var/tmp/dl-issue; rm -rf $D
-datalad create -c text2git $D; cd $D
+```sh
+#!/bin/sh
+set -eux
+PS4='> '
 
-for i in 1 2; do
-  ( datalad run --explicit --output "o$i" -m "cell $i" \
-      "python3 -c \"open('o$i','w').write('x')\"" ) &
+N="${1:-2}"
+
+cd "$(mktemp -d "${TMPDIR:-/tmp}/dl-explicit-conc-XXXXXXX")"
+pwd
+
+datalad create -c text2git ds
+cd ds
+
+i=1
+while [ "$i" -le "$N" ]; do
+    datalad run --explicit --output "o$i" -m "cell $i" \
+        "python3 -c \"open('o$i','w').write('x')\"" &
+    i=$((i + 1))
 done
 wait
 
+set +x
+echo "=== commits ==="
 git log --format='%h %s' --name-only
+echo "=== run records: $(git log --format=%s | grep -c '^\[DATALAD RUNCMD\]') of $N expected ==="
+echo "=== git status (empty means every output is tracked) ==="
 git status --porcelain
+echo "=== run record of HEAD ==="
+git log -1 --format=%B | sed -n '/^=== Do not change lines below/,$p'
 ```
 
 ## Actual result
 
-Both invocations exit 0. One commit exists:
+Both invocations exit 0 and both report `save(ok)`:
 
 ```
-f9e8433 [DATALAD RUNCMD] cell 2
+run(ok): .../ds (dataset) [python3 -c "open('o2','w').write('x')"]
+add(ok): o2 (file)
+save(ok): . (dataset)
+run(ok): .../ds (dataset) [python3 -c "open('o1','w').write('x')"]
+add(ok): o1 (file)
+save(ok): . (dataset)          <- no commit was created for this one
+```
+
+One run commit exists, containing both outputs:
+
+```
+=== commits ===
+91837fc [DATALAD RUNCMD] cell 2
 
 o1
 o2
+=== run records: 1 of 2 expected ===
+=== git status (empty means every output is tracked) ===
 ```
 
-Its run record declares a single output:
+and its record declares a single output:
 
 ```json
 {
+ "chain": [],
  "cmd": "python3 -c \"open('o2','w').write('x')\"",
+ "exit": 0,
  "inputs": [],
- "outputs": ["o2"],
- "exit": 0
+ "outputs": [
+  "o2"
+ ],
+ "pwd": "."
 }
 ```
 
-`o1` is committed inside a run record that states it produced only `o2`.
-The command that actually created `o1` is recorded nowhere. `git status`
-is clean.
-
-Both logs claim to have saved:
-
-```
-# cell 1
-run(ok): /var/tmp/dl-issue (dataset) [python3 -c "open('o1','w').write('x')"]
-add(ok): o1 (file)
-save(ok): . (dataset)          <- but no commit was created
-
-# cell 2
-run(ok): /var/tmp/dl-issue (dataset) [python3 -c "open('o2','w').write('x')"]
-add(ok): o2 (file)
-save(ok): . (dataset)
-```
+`o1` is committed inside a run record stating it produced only `o2`. The
+command that actually created `o1` is recorded nowhere. `git status` is
+clean.
 
 ## Expected result
 
@@ -94,27 +117,30 @@ with missing and misattributed provenance.
 
 ## Reproducibility
 
-At N=2, **6 of 6 trials** lost a record. Scaling the same reproducer:
+Running the script above as-is: **12 of 12 trials lost at least one run
+record**, across four concurrency levels, three trials each.
 
-| concurrency | exit 0 | run records created | outputs left untracked |
-| ----------: | -----: | ------------------: | ---------------------: |
-|           2 |    2/2 |                   1 |                      0 |
-|           3 |    3/3 |                   2 |                      0 |
-|           4 |    3/4 |                   1 |                      0 |
-|           8 |    6/8 |                   2 |                      0 |
+| concurrency | trials | run records created (of N) | outputs left untracked |
+| ----------: | -----: | :------------------------- | ---------------------: |
+|           2 |      3 | 1, 1, 1                    |                      0 |
+|           3 |      3 | 1, 2, 1                    |                      0 |
+|           4 |      3 | 1, 1, 1                    |                      0 |
+|           8 |      3 | 2, 1, 2                    |                      0 |
 
-Successful exits consistently exceed records created. At higher
-concurrency a second, *visible* failure also appears — a plain index-lock
-race on the final commit:
+Every output file is always written and always ends up tracked; only the
+records go missing.
+
+At higher concurrency a second, *visible* failure also appears — a plain
+index-lock race on the final commit, in **4 of 6** further trials at N=8:
 
 ```
 CommandError: 'git -c diff.ignoreSubmodules=none -c core.quotepath=false \
   commit -m '[DATALAD RUNCMD] cell 1 ...' failed with exitcode 128
-  [err: 'fatal: Unable to create '/var/tmp/dl-conc/.git/index.lock': File exists.
+  [err: 'fatal: Unable to create '.../ds/.git/index.lock': File exists.
 ```
 
-The command itself always succeeds; every output file is written. Only the
-commit fails, and neither git nor datalad retries.
+The command itself always succeeds; only the commit fails, and neither git
+nor datalad retries.
 
 ## Analysis
 
@@ -159,20 +185,8 @@ In increasing order of completeness:
    Retrying on `index.lock` alone is *not* sufficient: it fixes the crash
    while leaving the silent misattribution untouched.
 
-## Related: nested `datalad run`
+## See also
 
-While characterising this we also exercised nested runs, which would give
-per-sweep and per-cell records simultaneously. Serially it works, but two
-things are worth noting:
-
-* The outer run aborts with
-  `command created commits that include files not declared as --output`
-  unless `datalad.run.dirty-committed=ignore` is set. That config is a
-  dataset-wide override which also suppresses the check for cases where an
-  undeclared commit genuinely is a mistake. A narrower value meaning
-  "commits from nested `datalad run` are expected" would be safer.
-* With the override, the four expected records appear and the tree is
-  clean — but `chain` is `[]` on every record, inner ones included, so the
-  nesting relationship is not captured in the record itself and is only
-  inferable from commit order. If `chain` is intended to express this, it
-  does not appear to be populated.
+Nested `datalad run` — the other half of what we wanted here, per-sweep and
+per-cell records simultaneously — is filed separately: it is serial, not a
+race, and has a different cause.
