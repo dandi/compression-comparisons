@@ -191,16 +191,28 @@ def _cell_inputs(cell) -> list[str]:
     fetch or to judge. The recording path is read straight from the loader
     spec (`params.path`) rather than resolved through the loader, which would
     mean importing and instantiating it here just to learn a filename.
+
+    Anything inside RESULTS_DIR is excluded. A profile with a
+    `datasets_matrix` writes a generated dataset YAML per recording into
+    `<results>/generated-datasets/`, which is the sweep's own intermediate
+    artifact, not an external input: it is untracked when the cell runs, so
+    declaring it makes `run --explicit` refuse the cell outright ("declared
+    inputs have unsaved modifications ... [untracked]"). It is covered by
+    the sweep record, which declares the whole results directory.
     """
     if not DATALAD_RUN:
         return []
     root = Path.cwd().resolve()
+    results_abs = RESULTS_DIR.resolve()
     out: list[str] = []
 
     def _add(candidate) -> None:
         try:
-            rel = Path(candidate).resolve().relative_to(root)
+            resolved = Path(candidate).resolve()
+            rel = resolved.relative_to(root)
         except (ValueError, OSError):
+            return
+        if resolved == results_abs or results_abs in resolved.parents:
             return
         if Path(candidate).exists() and str(rel) not in out:
             out.append(str(rel))
