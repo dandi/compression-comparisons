@@ -12,6 +12,7 @@
 #   sh post-pr7901-review.sh                     # dry run, show the payload
 #   sh post-pr7901-review.sh --post              # post as a review comment
 #   sh post-pr7901-review.sh --post --request-changes
+#   sh post-pr7901-review.sh --bundle datalad-pr7901-review-2.md --post
 #
 # Requires: gh, authenticated (`gh auth login`, or GH_TOKEN in the env).
 
@@ -28,15 +29,26 @@ MAX_BODY=65536
 POST=0
 EVENT=comment
 
+expect_bundle=0
 for arg in "$@"; do
+    if [ "$expect_bundle" -eq 1 ]; then
+        case "$arg" in
+            /*) BUNDLE="$arg" ;;
+            *)  BUNDLE="$HERE/$arg" ;;
+        esac
+        expect_bundle=0
+        continue
+    fi
     case "$arg" in
+        --bundle)          expect_bundle=1 ;;
         --post)            POST=1 ;;
         --request-changes) EVENT=request-changes ;;
         --approve)         EVENT=approve ;;
-        -h|--help)         sed -n '2,18p' "$0"; exit 0 ;;
+        -h|--help)         sed -n '2,19p' "$0"; exit 0 ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
+[ "$expect_bundle" -eq 0 ] || { echo "--bundle needs a file argument" >&2; exit 2; }
 
 [ -f "$BUNDLE" ] || { echo "bundle not found: $BUNDLE" >&2; exit 1; }
 
@@ -56,6 +68,7 @@ size="$(wc -c < "$BODY" | tr -d ' ')"
     exit 1
 }
 
+echo "== bundle : $BUNDLE"
 echo "== target : $REPO#$PR"
 echo "== event  : $EVENT"
 echo "== body   : $BODY ($size chars, $(wc -l < "$BODY" | tr -d ' ') lines)"
