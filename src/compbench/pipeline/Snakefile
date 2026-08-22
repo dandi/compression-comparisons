@@ -149,6 +149,123 @@ if _missing:
         f"Available codecs: {sorted(_available)}\n" + _hint
     )
 
+# ---- Per-cell provenance (`datalad run`) ----------------------------------
+#
+# Each cell records its own `datalad run` commit, nested inside the one the
+# sweep driver wraps around snakemake. That needs datalad with the gh-7899 /
+# gh-7900 fixes (see .specify/specs/datalad-pin.md): released datalad loses
+# records under concurrency and rejects nested runs outright. `run_sweep.sh`
+# enforces the pin; this file only decides whether to emit the records.
+#
+# `datalad_run` config: "auto" (default) enables it when the results land
+# inside a datalad dataset whose root is the CWD, "yes"/"no" force it. The
+# CWD condition is deliberate — every path handed to `datalad run` below is
+# relative, and that is only unambiguous when snakemake was invoked from the
+# dataset root, which is how DEPLOY documents a sweep.
+def _dataset_root_for(path: Path) -> Path | None:
+    for cand in [path.resolve(), *path.resolve().parents]:
+        if (cand / ".datalad" / "config").is_file():
+            return cand
+    return None
+
+
+_dl_setting = str(config.get("datalad_run", "auto")).lower()
+_dl_root = _dataset_root_for(RESULTS_DIR)
+if _dl_setting in ("no", "false", "0", "off"):
+    DATALAD_RUN = False
+elif _dl_setting in ("yes", "true", "1", "on"):
+    if _dl_root is None or _dl_root != Path.cwd().resolve():
+        raise WorkflowError(
+            "datalad_run=yes, but results_dir is not inside a datalad dataset "
+            f"rooted at the CWD (dataset root: {_dl_root}, cwd: {Path.cwd()})."
+        )
+    DATALAD_RUN = True
+else:
+    DATALAD_RUN = _dl_root is not None and _dl_root == Path.cwd().resolve()
+
+
+def _cell_inputs(cell) -> list[str]:
+    """Declared `--input`s for a cell: its dataset YAML and the data it names.
+
+    Only paths inside the dataset are declared; anything else is not ours to
+    fetch or to judge. The recording path is read straight from the loader
+    spec (`params.path`) rather than resolved through the loader, which would
+    mean importing and instantiating it here just to learn a filename.
+    """
+    if not DATALAD_RUN:
+        return []
+    root = Path.cwd().resolve()
+    out: list[str] = []
+
+    def _add(candidate) -> None:
+        try:
+            rel = Path(candidate).resolve().relative_to(root)
+        except (ValueError, OSError):
+            return
+        if Path(candidate).exists() and str(rel) not in out:
+            out.append(str(rel))
+
+    spec = Path(cell.dataset_spec)
+    _add(spec)
+    if spec.suffix in (".yaml", ".yml") and spec.is_file():
+        try:
+            import yaml as _yaml
+
+            doc = _yaml.safe_load(spec.read_text()) or {}
+            data_path = (doc.get("params") or {}).get("path")
+        except Exception:
+            data_path = None
+        if data_path:
+            # relative to the dataset YAML's own directory or to the CWD,
+            # matching how the loaders themselves resolve it
+            for base in (root, spec.parent):
+                cand = Path(data_path)
+                cand = cand if cand.is_absolute() else base / cand
+                if cand.exists():
+                    _add(cand)
+                    break
+    return out
+
+
+def _run_cmd(cell_id: str) -> str:
+    """The command line for one cell, optionally wrapped in `datalad run`.
+
+    The inner command is passed to `datalad run` as ONE quoted argument.
+    Passing it as separate tokens would let datalad's own parser consume the
+    `--input` / `--output` that belong to `compbench run`.
+    """
+    cell = CELL_BY_ID[cell_id]
+    cell_dir = _cell_dir(cell_id)
+    chunk_arg = (
+        ""
+        if cell.chunk_duration_s is None
+        else f" --chunk-duration-s {shlex.quote(str(cell.chunk_duration_s))}"
+    )
+    inner = (
+        f"duct --output-prefix {shlex.quote(cell_dir)}/duct-"
+        f" --sample-interval 1 --report-interval 5"
+        f" compbench run"
+        f" --input {shlex.quote(cell.dataset_spec)}"
+        f" --codec {shlex.quote(cell.codec)}"
+        f" --codec-params {shlex.quote(cell.codec_params_cli)}"
+        f"{chunk_arg}"
+        f" --output-dir {shlex.quote(cell_dir)}"
+    )
+    if not DATALAD_RUN:
+        return inner
+    args = ["datalad", "run", "--explicit", "--output", cell_dir]
+    for ip in _cell_inputs(cell):
+        args += ["--input", ip]
+    args += [
+        "-m",
+        f"cell {cell_id}: {cell.codec}"
+        + (f" [{cell.codec_params_cli}]" if cell.codec_params_cli else "")
+        + f" on {cell.dataset_label or cell.dataset_spec}",
+        inner,
+    ]
+    return " ".join(shlex.quote(a) for a in args)
+
+
 CONTAINER_BASE = config.get(
     "container_base", "docker://ghcr.io/allenneuraldynamics/aind-ephys-pipeline-base:si-0.103.0"
 )
@@ -214,16 +331,8 @@ rule run_cell:
         manifest = RESULTS_DIR / "{cell_id}" / "manifest.json",
         duct_info = RESULTS_DIR / "{cell_id}" / "duct-info.json",
     params:
-        cell_dir = lambda w: _cell_dir(w.cell_id),
         cell_dir_q = lambda w: shlex.quote(_cell_dir(w.cell_id)),
-        input_q = lambda w: shlex.quote(CELL_BY_ID[w.cell_id].dataset_spec),
-        codec_q = lambda w: shlex.quote(CELL_BY_ID[w.cell_id].codec),
-        params_q = lambda w: shlex.quote(CELL_BY_ID[w.cell_id].codec_params_cli),
-        chunk_arg = lambda w: (
-            ""
-            if CELL_BY_ID[w.cell_id].chunk_duration_s is None
-            else f"--chunk-duration-s {shlex.quote(str(CELL_BY_ID[w.cell_id].chunk_duration_s))}"
-        ),
+        run_cmd = lambda w: _run_cmd(w.cell_id),
     threads: 1
     resources:
         mem_mb = 4096,
@@ -235,16 +344,7 @@ rule run_cell:
         export COMPBENCH_BLOSC_THREADS="${{COMPBENCH_BLOSC_THREADS:-1}}"
         {WAVPACK_EXPORT}
         mkdir -p {params.cell_dir_q}
-        duct \
-            --output-prefix {params.cell_dir_q}/duct- \
-            --sample-interval 1 \
-            --report-interval 5 \
-            compbench run \
-                --input {params.input_q} \
-                --codec {params.codec_q} \
-                --codec-params {params.params_q} \
-                {params.chunk_arg} \
-                --output-dir {params.cell_dir_q}
+        {params.run_cmd}
         """
 
 
