@@ -227,6 +227,23 @@ def _cell_inputs(cell) -> list[str]:
     return out
 
 
+def _portable(spec: str) -> str:
+    """Rewrite a path inside the dataset as relative to it.
+
+    `_resolve_dataset_spec` hands back an absolute path when it found the
+    dataset YAML by walking up from the profile. Recording that verbatim
+    would bake this machine's layout into the run record, so a `rerun` in
+    any other clone would fail. Paths outside the dataset are left alone:
+    they are not ours to rewrite, and a relative form would be wrong.
+    """
+    if not DATALAD_RUN:
+        return spec
+    try:
+        return str(Path(spec).resolve().relative_to(Path.cwd().resolve()))
+    except (ValueError, OSError):
+        return spec
+
+
 def _run_cmd(cell_id: str) -> str:
     """The command line for one cell, optionally wrapped in `datalad run`.
 
@@ -245,7 +262,7 @@ def _run_cmd(cell_id: str) -> str:
         f"duct --output-prefix {shlex.quote(cell_dir)}/duct-"
         f" --sample-interval 1 --report-interval 5"
         f" compbench run"
-        f" --input {shlex.quote(cell.dataset_spec)}"
+        f" --input {shlex.quote(_portable(cell.dataset_spec))}"
         f" --codec {shlex.quote(cell.codec)}"
         f" --codec-params {shlex.quote(cell.codec_params_cli)}"
         f"{chunk_arg}"
