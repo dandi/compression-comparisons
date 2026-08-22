@@ -1,0 +1,43 @@
+# Matrix smoke — the tiniest sweep that exercises the `datasets_matrix`
+# path, i.e. the one that writes a GENERATED dataset YAML per recording
+# into <results>/generated-datasets/.
+#
+# WHY THIS EXISTS: `smoke.yaml` lists its datasets directly, so it never
+# produces a generated YAML. That gap let a bug reach a 912-cell sweep —
+# the generated YAML was declared as a `datalad run --input`, and being
+# untracked at cell time it made every cell fail with
+# "declared inputs have unsaved modifications ... [untracked]".
+# Any change to per-cell provenance should be tried here first.
+#
+# Deliberately a 5 s slice of ONE recording: this validates plumbing, not
+# compression. It is not a measurement and its numbers mean nothing.
+name: matrix-smoke
+chunk_durations_s: [1.0]
+
+datasets_matrix:
+  loader: aind-benchmark
+  params:
+    start_s: 0.0
+    duration_s: 5.0
+
+  recordings:
+    - label: ibl-CSHZAD026
+      vars: {lsb: 1}
+      params: {path: sourcedata/aind-ephys-compression/ibl-np1/CSHZAD026_2020-09-04_probe00}
+    - label: aind-625749
+      vars: {lsb: 12}
+      params: {path: sourcedata/aind-ephys-compression/aind-np1/625749_2022-08-03_15-15-06_ProbeA}
+
+  preprocessing:
+    - label: raw
+    - label: lsb
+      skip_when_vars: {lsb: 1}   # no-op at lsb=1, would duplicate `raw`
+      steps:
+        - kind: lsb_correction
+          lsb: "${lsb}"
+
+codecs:
+  - codec: blosc-zstd
+    params:
+      level: 9
+      shuffle: bit
