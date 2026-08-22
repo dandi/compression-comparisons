@@ -44,9 +44,19 @@ stay comparable across machines.
 ### 0. Prerequisites
 
 ```bash
-sudo apt-get install -y git datalad git-annex podman apptainer   # or docker/singularity
+sudo apt-get install -y git git-annex podman apptainer   # or docker/singularity
 pipx install uv
+
+# datalad is PINNED to the PR #7901 branch, not the distro package: released
+# datalad loses `run` records under concurrency and rejects nested runs, so
+# per-cell provenance would be silently wrong. Rationale, evidence and the
+# repin-on-merge checklist: .specify/specs/datalad-pin.md
+uv tool install --force \
+  "datalad @ git+https://github.com/datalad/datalad.git@30b6deef70e6808de43c40bfe870462de7ae9373"
 ```
+
+The sweep scripts refuse to run against any other datalad
+(`COMPBENCH_ALLOW_ANY_DATALAD=1` overrides, at the cost of correct records).
 
 **Check the scratch volume before any sweep.**
 
@@ -485,7 +495,7 @@ Things a fresh deployment will run into that are *not* fixed in code.
   gone. The `.venv` built against 3.11 dies with a dangling
   `python -> /usr/bin/python3.11` symlink; rebuild it (`uv venv --python
   3.13 && uv pip install -e '.[devel,ephys,pipeline,sorting]'`) and
-  reinstall datalad (`uv tool install datalad`). Prebuilt `src/bwc/bin/`
+  reinstall datalad (the pinned build — see Prerequisites). Prebuilt `src/bwc/bin/`
   binaries survive the move and still run, so BWC does not need cmake
   again unless you change it. All 354 tests pass on 3.13.
 
