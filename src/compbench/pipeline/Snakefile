@@ -259,7 +259,12 @@ def _run_cmd(cell_id: str) -> str:
         else f" --chunk-duration-s {shlex.quote(str(cell.chunk_duration_s))}"
     )
     inner = (
-        f"duct --output-prefix {shlex.quote(cell_dir)}/duct-"
+        # --clobber so the recorded command is replayable: `datalad rerun`
+        # of a cell re-executes into a directory that already holds duct's
+        # own files from the original run, and duct refuses to overwrite
+        # them otherwise. A no-op on a fresh sweep, where the cell
+        # directory is this rule's own output and starts empty.
+        f"duct --clobber --output-prefix {shlex.quote(cell_dir)}/duct-"
         f" --sample-interval 1 --report-interval 5"
         f" compbench run"
         f" --input {shlex.quote(_portable(cell.dataset_spec))}"
