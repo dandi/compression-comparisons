@@ -30,3 +30,31 @@ Rules:
 * This applies to generated output too, not just hand-written files: a
   renderer that emits ragged tables is a bug to fix in the renderer, not
   something to tidy up afterwards.
+
+## Never commit to the study dataset while a sweep is running
+
+`results/dandi-t261-compression-study/` is the DataLad dataset the per-cell
+`datalad run` records live in. Any commit landing on its branch during a
+sweep falls inside some in-flight cell's run window, and that cell fails
+with:
+
+    command created commits that include files not declared as --output:
+      ['.gitignore', 'code/partial_report.sh', ...]
+
+Snakemake then *deletes that cell's completed outputs* as possibly corrupt,
+so finished compression work is thrown away. This is a documented non-goal
+upstream: a plain `git commit` from another process is indistinguishable
+from commits made by the command itself.
+
+Cost the first time: 4 cells, each of which had already finished and
+reported `round_trip_ok=True`.
+
+So, while any sweep is in flight:
+
+* Do not `git commit` in the study dataset. Not scripts, not `.gitignore`,
+  not notes. It is not enough to leave the pinned tool submodule alone.
+* Write anything new to a gitignored path (`.partial-reports/`), or to the
+  tool repository, which is a separate git repo and safe.
+* Stage the study-side changes and commit them once the sweep has finished.
+
+The same applies to `datalad save` and anything else that creates a commit.
