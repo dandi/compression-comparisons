@@ -48,9 +48,14 @@ def test_render_markdown_sorts_by_cr_desc() -> None:
     ]
     body = render_markdown(rows)
     # b (CR=3) should appear before a (CR=1.5) in the table body.
-    b_idx = body.find("| b |")
-    a_idx = body.find("| a |")
-    assert 0 <= b_idx < a_idx
+    # Cells are space-padded for readability (CLAUDE.md), so match on the
+    # stripped cell rather than on incidental formatting.
+    order = [
+        [c.strip() for c in line.strip().strip("|").split("|")][3]
+        for line in body.splitlines()
+        if line.startswith("|") and not set(line) <= set("|-: ")
+    ]
+    assert order.index("b") < order.index("a")
 
 
 @pytest.mark.ai_generated
@@ -145,5 +150,12 @@ def test_render_partial_row_no_crash(tmp_path: Path) -> None:
         },  # no duct fields
     ]
     body = render_markdown(rows)
-    assert "x |" in body
+    # padded for readability (CLAUDE.md) -- assert on the cell, not its padding
+    cells = {
+        c.strip()
+        for line in body.splitlines()
+        if line.startswith("|")
+        for c in line.strip().strip("|").split("|")
+    }
+    assert "x" in cells
     assert body.count("—") >= 1  # some fields default to em-dash

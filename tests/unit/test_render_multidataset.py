@@ -24,6 +24,32 @@ def _row(dataset, codec, params, cr, preproc="raw", **extra):
     return row
 
 
+def _has_row(body: str, *cells: str) -> bool:
+    """Is there a table row with exactly these cell values?
+
+    Tables are space-padded for readability (CLAUDE.md), so compare stripped
+    cells rather than a literal `| a | b |` substring.
+    """
+    want = list(cells)
+    for line in body.splitlines():
+        if not line.startswith("|"):
+            continue
+        got = [c.strip() for c in line.strip().strip("|").split("|")]
+        if got[: len(want)] == want:
+            return True
+    return False
+
+
+def _has_cell(body: str, value: str) -> bool:
+    """Does any table row contain a cell with exactly this value?"""
+    for line in body.splitlines():
+        if not line.startswith("|"):
+            continue
+        if value in [c.strip() for c in line.strip().strip("|").split("|")]:
+            return True
+    return False
+
+
 def test_single_dataset_sweep_has_no_median_section():
     body = render_markdown([_row("recA", "lzma", "preset_6", 3.0)])
     assert "Median CR across" not in body
@@ -38,7 +64,7 @@ def test_multi_dataset_sweep_reports_median_min_max_and_n():
     body = render_markdown(rows)
     assert "Median CR across 3 datasets" in body
     # median 4.000, min 3.000, max 5.000, n 3
-    assert "| raw @ whole | lzma | lzma-preset_6 | 4.000 | 3.000 | 5.000 | 3 |" in body
+    assert _has_row(body, "raw @ whole", "lzma", "lzma-preset_6", "4.000", "3.000", "5.000", "3")
 
 
 def test_median_is_computed_per_preprocessing_variant():
@@ -50,8 +76,8 @@ def test_median_is_computed_per_preprocessing_variant():
         _row("recB", "lzma", "preset_6", 9.0, preproc="bandpass(300-6000Hz,o4)"),
     ]
     body = render_markdown(rows)
-    assert "| raw @ whole | lzma | lzma-preset_6 | 3.000 |" in body
-    assert "| bandpass(300-6000Hz,o4) @ whole | lzma | lzma-preset_6 | 9.000 |" in body
+    assert _has_row(body, "raw @ whole", "lzma", "lzma-preset_6", "3.000")
+    assert _has_row(body, "bandpass(300-6000Hz,o4) @ whole", "lzma", "lzma-preset_6", "9.000")
 
 
 def test_short_n_is_visible_when_cells_are_missing():
@@ -62,14 +88,14 @@ def test_short_n_is_visible_when_cells_are_missing():
         _row("recA", "t261", "qp1.5", 8.0),
     ]
     body = render_markdown(rows)
-    assert "| raw @ whole | t261 | t261-qp1.5 | 8.000 | 8.000 | 8.000 | 1 |" in body
+    assert _has_row(body, "raw @ whole", "t261", "t261-qp1.5", "8.000", "8.000", "8.000", "1")
 
 
 def test_main_table_carries_dataset_and_preprocessing():
     body = render_markdown(
         [_row("ibl-CSHZAD026-bp", "lzma", "preset_6", 3.0, preproc="bandpass(300-6000Hz,o4)")]
     )
-    assert "| dataset | preproc | chunk | codec |" in body
+    assert _has_row(body, "dataset", "preproc", "chunk", "codec")
     assert "ibl-CSHZAD026-bp" in body
     assert "bandpass(300-6000Hz,o4)" in body
 
@@ -99,7 +125,7 @@ def test_pre_r2h3_rows_without_preprocessing_column_read_as_raw():
     row = _row("recA", "lzma", "preset_6", 3.0)
     del row["preprocessing_summary"]
     body = render_markdown([row])
-    assert "| raw |" in body
+    assert _has_cell(body, "raw")
 
 
 def test_output_is_stable_across_repeated_renders():
@@ -123,8 +149,8 @@ def test_chunking_partitions_the_median_section():
         _row("recB", "lzma", "preset_6", 3.0, metric_chunk_duration_s=1.0),
     ]
     body = render_markdown(rows)
-    assert "| raw @ whole | lzma | lzma-preset_6 | 9.000 |" in body
-    assert "| raw @ 1s | lzma | lzma-preset_6 | 3.000 |" in body
+    assert _has_row(body, "raw @ whole", "lzma", "lzma-preset_6", "9.000")
+    assert _has_row(body, "raw @ 1s", "lzma", "lzma-preset_6", "3.000")
 
 
 def test_whole_buffer_is_labelled_not_blank():

@@ -21,12 +21,29 @@ def test_snakefile_uses_shlex_quote_for_all_interpolated_fields() -> None:
     body = SNAKEFILE.read_text()
     assert "import shlex" in body, "Snakefile must `import shlex`"
     # Every field that flows from a profile YAML into the shell rule must be
-    # quoted. We enforce the pattern (`shlex.quote(...)`) is used for the four
-    # user-controlled inputs.
-    for field in ("dataset_spec", "codec", "codec_params_cli"):
-        assert f"shlex.quote(CELL_BY_ID[w.cell_id].{field})" in body, (
-            f"Snakefile passes {field} through shell without shlex.quote"
+    # quoted. The command line is assembled in `_run_cmd()`, so assert the
+    # property there: each user-controlled field appears ONLY inside a
+    # shlex.quote(...) call. Matching on a fixed call-site spelling instead
+    # would silently stop checking anything the next time that function is
+    # refactored -- which is exactly what happened when per-cell `datalad
+    # run` wrapping moved the interpolation out of the `params:` block.
+    start = body.index("def _run_cmd(")
+    end = body.index("\nrule ", start)
+    run_cmd = body[start:end]
+    for field in ("dataset_spec", "codec", "codec_params_cli", "cell_dir"):
+        uses = run_cmd.count(field)
+        assert uses, f"_run_cmd() no longer references {field}"
+        quoted = run_cmd.count(f"shlex.quote(_portable(cell.{field}))") \
+            + run_cmd.count(f"shlex.quote(cell.{field})") \
+            + run_cmd.count(f"shlex.quote({field})")
+        assert quoted, (
+            f"_run_cmd() interpolates {field} without shlex.quote -- "
+            "profile YAMLs are untrusted (plan 9.5)"
         )
+    # and the whole inner command is quoted again when handed to `datalad run`
+    assert "shlex.quote(a) for a in args" in run_cmd, (
+        "the datalad run argv must be quoted as a whole"
+    )
 
 
 @pytest.mark.ai_generated
