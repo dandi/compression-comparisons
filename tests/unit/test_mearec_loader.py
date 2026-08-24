@@ -27,25 +27,48 @@ def test_mearec_missing_file(tmp_path: Path) -> None:
 
 
 @pytest.mark.ai_generated
-def test_unimplemented_sorting_metrics_still_raise() -> None:
-    """Tracks which parts of the sorting contract are still skeletons.
+def test_no_sorting_metric_is_still_a_stub() -> None:
+    """Every function in the sorting contract is implemented.
 
-    `gt_comparison_metrics` and `unit_classification` are implemented and
-    verified against the paper's own released sortings
-    (tests/unit/test_sorting_golden_replay.py); they are deliberately not
-    listed here. The rest still raise, and this test fails loudly when one
-    of them lands, so the list cannot silently go stale.
+    This replaces a guard that asserted the opposite -- that the five
+    Phase 3.5 metrics still raised NotImplementedError, so the list could
+    not go stale while they were skeletons. They landed on 2026-08-24, so
+    the guard now runs the other way: nothing may regress to a stub, and a
+    newly added metric cannot be shipped as one.
     """
+    import inspect
+
     from compbench.metrics import sorting
 
-    two_args = (sorting.sorting_agreement, sorting.qc_pass_fraction, sorting.excess_spikes)
-    for fn in two_args:
-        with pytest.raises(NotImplementedError, match=r"Phase 3\.5"):
-            fn(None, None)  # type: ignore[arg-type]
-    with pytest.raises(NotImplementedError, match=r"Phase 3\.5"):
-        sorting.run_to_run_floor([None, None])  # type: ignore[list-item]
-    with pytest.raises(NotImplementedError, match=r"Phase 3\.5"):
-        sorting.waveform_feature_errors(None, None, None)  # type: ignore[arg-type]
+    stubs = [
+        name
+        for name in sorting.__all__
+        if "NotImplementedError" in inspect.getsource(getattr(sorting, name))
+    ]
+    assert not stubs, f"still stubs: {stubs}"
+
+
+@pytest.mark.ai_generated
+def test_waveform_features_use_the_papers_definition() -> None:
+    """Fig 14 must not be judged with SI >= 0.104's half_width.
+
+    0.97.1 takes the OUTERMOST half-amplitude crossings; 0.104 takes the
+    ones adjacent to the trough, and over the paper's own NP1 templates the
+    p90 relative difference is 57 % -- five times the 10 % line Fig 14 is
+    judged against. The implementation therefore computes the features
+    itself and stamps which definition it used.
+    """
+    import inspect
+
+    from compbench.metrics import sorting
+
+    src = inspect.getsource(sorting.waveform_feature_errors)
+    assert "buccino2023/spikeinterface-0.97.1" in src
+    # it must NOT delegate to the installed version's renamed metric
+    assert "compute_template_metrics" not in src
+    # upsampling must actually be used, not merely accepted: these features
+    # come from sample indices and are otherwise quantised to ~10 % steps
+    assert "upsampling_factor" in src and "_upsample" in src
 
 
 @pytest.mark.ai_generated
