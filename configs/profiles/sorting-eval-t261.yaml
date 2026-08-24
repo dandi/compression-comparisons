@@ -1,0 +1,63 @@
+# T.261 sorting-fidelity evaluation — the study's central question.
+#
+# The paper's headline lossy claim is that WavPack Hybrid at 2.25 bps
+# "preserves spike waveforms and does not affect sorting accuracy". This
+# profile asks whether T.261 can make the analogous claim, and at which QP.
+# Compression ratio alone cannot answer it: the endpoints that matter are
+# ground-truth sorting accuracy, unit classifications, and the Fig 14
+# waveform-feature errors against the paper's 10 % line.
+#
+# WHY MEArec: ground truth is known, so accuracy/precision/recall are
+# measurable rather than inferred from agreement with another sorting. The
+# paper's own simulated sortings are bit-identical between runs, so the
+# run-to-run floor here is expected to be 1.0 — that must be MEASURED, not
+# assumed (see metrics.sorting.run_to_run_floor).
+#
+# ARMS, and why each is present:
+#   * lossless anchors (blosc-zstd, T.261 lossless, bittrunc bits=0) — the
+#     null control. A lossless codec must change nothing; if it does, the
+#     pipeline is measuring its own noise and every lossy number is void.
+#   * T.261 QP sweep — the arm under test.
+#   * WavPack Hybrid at the paper's own bps points — the incumbent to beat,
+#     including 2.25 where the paper's claim sits.
+#   * bit truncation — the paper's rejected baseline, kept as the POSITIVE
+#     control: its waveform errors are "well above 20 %" and it must fail
+#     the 10 % line. An arm that never fails proves nothing.
+#
+# Start at 100 s for iteration. Two caveats for the full run:
+#   * qc_pass_fraction needs the FULL recording — presence_ratio bins at
+#     60 s, so a 100 s slice leaves ~1 bin and the metric degenerates to ~1
+#     for every unit. Fig 12 numbers require mearec-np1-full.
+#   * the paper's Fig 14 tolerance is judged on distributions, so unit
+#     count matters more than duration for that metric.
+
+name: sorting-eval-t261
+datasets:
+  - configs/datasets/mearec-np1-100s.yaml
+
+codecs:
+  # --- lossless anchors (null control) --------------------------------
+  - {codec: blosc-zstd, params: {level: 9, shuffle: byte}}
+  - {codec: t261, params: {preset: combinedPresetEEG_IndepChannel_lossless}}
+  - {codec: bittrunc, params: {bits: 0}}
+
+  # --- T.261 lossy QP sweep (the arm under test) ----------------------
+  - {codec: t261, params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 1.5}}
+  - {codec: t261, params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 2.0}}
+  - {codec: t261, params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 3.0}}
+  - {codec: t261, params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 5.0}}
+  - {codec: t261, params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 8.0}}
+
+  # --- WavPack Hybrid, the paper's own bps points ---------------------
+  - {codec: wavpack, params: {level: 2, bps: 6.0}}
+  - {codec: wavpack, params: {level: 2, bps: 4.0}}
+  - {codec: wavpack, params: {level: 2, bps: 3.0}}
+  - {codec: wavpack, params: {level: 2, bps: 2.5}}
+  - {codec: wavpack, params: {level: 2, bps: 2.25}}
+
+  # --- bit truncation: the positive control ---------------------------
+  # The paper rejects these; they must FAIL the 10 % waveform line.
+  - {codec: bittrunc, params: {bits: 4}}
+  - {codec: bittrunc, params: {bits: 5}}
+  - {codec: bittrunc, params: {bits: 6}}
+  - {codec: bittrunc, params: {bits: 7}}

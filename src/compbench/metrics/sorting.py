@@ -53,7 +53,38 @@ would feed them (compress -> decompress -> sort) is not built yet.
 
 from __future__ import annotations
 
+import itertools
+import pathlib
+import shutil
 from typing import Any
+
+import numpy as np
+
+
+def _analyzer_on_disk(sorting, recording, sparse=False):
+    """Build a SortingAnalyzer that does not allocate in /dev/shm.
+
+    SpikeInterface's default (and its "memory" format) puts waveform buffers
+    in POSIX shared memory. Containers routinely ship a 64 MB /dev/shm, where
+    the allocation succeeds and the first touch past the limit raises SIGBUS
+    -- the process dies with exit 135, no traceback, no Python exception to
+    catch. Writing to a temp folder trades a little I/O for not depending on
+    the host's shm sizing at all.
+
+    The caller owns the returned folder's lifetime via `analyzer.folder`.
+    """
+    import tempfile
+
+    from spikeinterface import create_sorting_analyzer
+
+    tmpdir = tempfile.mkdtemp(prefix="compbench-analyzer-")
+    return create_sorting_analyzer(
+        sorting,
+        recording,
+        sparse=sparse,
+        format="binary_folder",
+        folder=str(pathlib.Path(tmpdir) / "analyzer"),
+    )
 
 
 def gt_comparison_metrics(
@@ -164,7 +195,28 @@ def sorting_agreement(
           "match_score": float, "delta_time_ms": float,
         }
     """
-    raise NotImplementedError("Phase 3.5 R1-H3 — implementation pending")
+    from spikeinterface.comparison import compare_multiple_sorters
+
+    cmp = compare_multiple_sorters(
+        [lossless, candidate],
+        name_list=["lossless", "candidate"],
+        match_score=match_score,
+        delta_time=delta_time_ms,
+    )
+    # the paper takes the DIAGONAL of the ordered agreement matrix: unit i of
+    # the lossless sort against its own best match in the candidate, sorted
+    # descending. The curve's shape against the floor is the claim, so the
+    # vector is returned whole and never averaged here.
+    ordered = np.diag(np.asarray(cmp.get_ordered_agreement_scores()))
+    agreement_sorting = cmp.get_agreement_sorting(minimum_agreement_count=2)
+    return {
+        "n_lossless_units": int(len(lossless.unit_ids)),
+        "n_candidate_units": int(len(candidate.unit_ids)),
+        "ordered_agreement": [float(x) for x in ordered],
+        "n_matched_at_2": int(len(agreement_sorting.unit_ids)),
+        "match_score": float(match_score),
+        "delta_time_ms": float(delta_time_ms),
+    }
 
 
 def run_to_run_floor(
@@ -204,7 +256,38 @@ def run_to_run_floor(
     Returns the same shape as `sorting_agreement` so the floor can be
     plotted on the same axes.
     """
-    raise NotImplementedError("Phase 3.5 R1-H3 — implementation pending")
+    if len(sortings) < 2:
+        raise ValueError(
+            "a run-to-run floor needs at least two sortings of the same "
+            f"lossless data; got {len(sortings)}"
+        )
+    # Same shape as sorting_agreement() so the floor plots on the same axes.
+    # Pairwise over every combination, then the ELEMENTWISE MINIMUM across
+    # pairs: the floor is the worst agreement the sorter produces on
+    # identical input, not the average of its better days.
+    curves = []
+    for a, b in itertools.combinations(range(len(sortings)), 2):
+        curves.append(
+            sorting_agreement(sortings[a], sortings[b], match_score=match_score)[
+                "ordered_agreement"
+            ]
+        )
+    n = min(len(c) for c in curves)
+    floor = [float(min(c[i] for c in curves)) for i in range(n)]
+    return {
+        "n_lossless_units": int(len(sortings[0].unit_ids)),
+        "n_candidate_units": int(len(sortings[-1].unit_ids)),
+        "ordered_agreement": floor,
+        "n_matched_at_2": int(min(len(s_.unit_ids) for s_ in sortings)),
+        "match_score": float(match_score),
+        "delta_time_ms": 0.4,
+        "n_pairs": len(curves),
+        "per_pair_ordered_agreement": [[float(x) for x in c] for c in curves],
+        # a floor of exactly 1.0 is a real and expected outcome on simulated
+        # data (the paper's own MEArec sortings are bit-identical); it is NOT
+        # evidence that the measurement failed
+        "is_perfect": bool(floor and min(floor) == 1.0),
+    }
 
 
 def excess_spikes(
@@ -232,7 +315,60 @@ def excess_spikes(
     an `excess_spike_symmetric` boolean (`|mean/std| < 0.1`) that appears
     nowhere in the paper.
     """
-    raise NotImplementedError("Phase 3.5 R1-H3 — implementation pending")
+    from spikeinterface.comparison import compare_two_sorters
+    from spikeinterface.comparison.comparisontools import compare_spike_trains
+
+    cmp = compare_two_sorters(
+        lossless, candidate, sorting1_name="lossless", sorting2_name="candidate"
+    )
+    fs = float(lossless.get_sampling_frequency())
+    delta_frames = int(delta_frames_multiplier * cmp.delta_frames)
+
+    rows = []
+    for unit1 in lossless.unit_ids:
+        unit2 = cmp.get_best_unit_match1(unit1)
+        if unit2 is None or (hasattr(unit2, "__len__") and len(str(unit2)) == 0):
+            continue
+        score = float(cmp.get_agreement_fraction(unit1, unit2))
+        if score < min_agreement:
+            continue
+        st1 = lossless.get_unit_spike_train(unit1)
+        st2 = candidate.get_unit_spike_train(unit2)
+        if len(st1) == 0 and len(st2) == 0:
+            continue
+        l1, l2 = compare_spike_trains(st1, st2, delta_frames=delta_frames)
+        l1 = np.asarray(l1)
+        l2 = np.asarray(l2)
+        n_tp = int((l1 == "TP").sum())
+        n_total = len(st1) + len(st2) - n_tp
+        if n_total <= 0:
+            continue
+        rows.append(
+            {
+                "unit_lossless": str(unit1),
+                "unit_candidate": str(unit2),
+                "agreement": score,
+                "n_spikes_lossless": int(len(st1)),
+                "n_spikes_candidate": int(len(st2)),
+                # two ONE-SIDED percentages; their symmetry is the claim. A
+                # net difference would read zero for a unit that gains 500
+                # spikes and loses 500.
+                "excess_lossless_percent": float((l1 == "FN").sum() / n_total * 100),
+                "excess_candidate_percent": float((l2 == "FP").sum() / n_total * 100),
+            }
+        )
+
+    lo = [r["excess_lossless_percent"] for r in rows]
+    hi = [r["excess_candidate_percent"] for r in rows]
+    return {
+        "n_matched_units": len(rows),
+        "min_agreement": float(min_agreement),
+        "delta_frames": delta_frames,
+        "sampling_frequency_hz": fs,
+        "per_unit": rows,
+        "excess_lossless_percent_median": float(np.median(lo)) if lo else None,
+        "excess_candidate_percent_median": float(np.median(hi)) if hi else None,
+    }
 
 
 def unit_classification(
@@ -271,6 +407,7 @@ def qc_pass_fraction(
     sorting: Any,
     recording: Any,
     quality_thresholds: dict[str, float] | None = None,
+    n_passing_lossless: int | None = None,
 ) -> dict[str, float | int]:
     """Units passing the paper's automatic curation (Fig 12).
 
@@ -307,7 +444,57 @@ def qc_pass_fraction(
     Returns: {n_units, n_passing, n_failing, passing_fraction,
               passing_fraction_vs_lossless, thresholds: {...}}
     """
-    raise NotImplementedError("Phase 3.5 R1-H3 — implementation pending")
+    from spikeinterface.metrics import compute_quality_metrics
+
+    analyzer = _analyzer_on_disk(sorting, recording, sparse=True)
+    # amplitude_cutoff needs spike amplitudes, which need templates
+    analyzer.compute(["random_spikes", "waveforms", "templates", "spike_amplitudes"])
+
+    thresholds = {
+        # Siegle et al. 2021, as the paper's SCRIPT applies them. Its README
+        # says presence_ratio > 0.9; the script wins. An earlier revision of
+        # this file had isi_violations_ratio < 0.1, 5x too strict.
+        "isi_violations_ratio": 0.5,
+        "amplitude_cutoff": 0.1,
+        "presence_ratio": 0.95,
+    }
+    if quality_thresholds:
+        thresholds.update(quality_thresholds)
+    qm = compute_quality_metrics(
+        analyzer,
+        metric_names=["isi_violation", "presence_ratio", "amplitude_cutoff"],
+    )
+    missing = [c for c in thresholds if c not in qm.columns]
+    if missing:
+        raise RuntimeError(
+            f"quality metrics missing column(s) {missing}; got {list(qm.columns)}. "
+            "Metric column names drift between SpikeInterface versions -- pin "
+            "the version rather than renaming silently."
+        )
+    passing = (
+        (qm["isi_violations_ratio"] < thresholds["isi_violations_ratio"])
+        & (qm["amplitude_cutoff"] < thresholds["amplitude_cutoff"])
+        & (qm["presence_ratio"] > thresholds["presence_ratio"])
+    )
+    n_units = int(len(qm))
+    n_passing = int(passing.sum())
+    out = {
+        "n_units": n_units,
+        "n_passing": n_passing,
+        "n_failing": n_units - n_passing,
+        "passing_fraction": (n_passing / n_units) if n_units else None,
+        "thresholds": thresholds,
+        "passing_unit_ids": [str(u) for u in qm.index[passing]],
+    }
+    # Fig 12 normalises by the session's OWN lossless counts, not by the unit
+    # total. `passing_fraction` is a different quantity and will not overlay.
+    if n_passing_lossless is not None:
+        out["passing_fraction_vs_lossless"] = (
+            n_passing / n_passing_lossless if n_passing_lossless else None
+        )
+    else:
+        out["passing_fraction_vs_lossless"] = None
+    return out
 
 
 def waveform_feature_errors(
@@ -365,7 +552,148 @@ def waveform_feature_errors(
     distributions **below 10 %** for WavPack Hybrid, against "well above
     20 %" for the bit-truncation settings it rejects.
     """
-    raise NotImplementedError("Phase 3.5 R1-H3 — implementation pending")
+    def _templates(recording):
+        analyzer = _analyzer_on_disk(gt_sorting, recording, sparse=False)
+        analyzer.compute(
+            {
+                "random_spikes": {"max_spikes_per_unit": 500, "seed": seed},
+                # ms_before is 3.0, NOT the modern default of 1.0: the paper
+                # never overrode SI 0.97.1's default and its vendored
+                # waveforms/params.json confirms it. At 1.0 the window is half
+                # as long and every feature shifts silently.
+                "waveforms": {"ms_before": 3.0, "ms_after": ms_after},
+                "templates": {"ms_before": 3.0, "ms_after": ms_after},
+            }
+        )
+        ext = analyzer.get_extension("templates")
+        data = np.asarray(ext.get_data())
+        folder = getattr(analyzer, "folder", None)
+        return folder, data
+
+    ref_folder, ref_templates = _templates(reference_recording)
+    cand_folder, cand_templates = _templates(candidate_recording)
+    for _f in (ref_folder, cand_folder):
+        if _f is not None:
+            shutil.rmtree(pathlib.Path(_f).parent, ignore_errors=True)
+    if ref_templates.shape != cand_templates.shape:
+        raise RuntimeError(
+            f"template shape mismatch {ref_templates.shape} vs "
+            f"{cand_templates.shape}: the two recordings must share geometry "
+            "and the same ground-truth spike trains"
+        )
+
+    fs = float(reference_recording.get_sampling_frequency())
+    locs = reference_recording.get_channel_locations()
+
+    def _upsample(wf):
+        """Interpolate `upsampling_factor`x before measuring.
+
+        peak_to_valley and half_width are derived from sample INDICES, so at
+        32 kHz they are quantised to ~1/N of the feature width -- a
+        one-sample shift on a ten-sample half-width reads as exactly 10 %,
+        which is the paper's whole tolerance. The paper upsamples for this
+        reason; without it these two features are step functions and the
+        Fig 14 comparison is meaningless.
+        """
+        if upsampling_factor <= 1:
+            return wf, fs
+        x = np.arange(wf.size, dtype=float)
+        xi = np.linspace(0.0, wf.size - 1.0, wf.size * upsampling_factor)
+        return np.interp(xi, x, wf), fs * upsampling_factor
+
+    def _features(wf):
+        """The paper's (SI 0.97.1) definitions, implemented directly.
+
+        SI 0.104 renamed these and CHANGED half_width: 0.97.1 takes the
+        OUTERMOST half-amplitude crossings across the window, 0.104 takes the
+        ones adjacent to the trough. Over the paper's own NP1 templates the
+        p90 relative difference is 57 %, five times the 10 % line Fig 14 is
+        judged against -- so relying on whatever the installed version calls
+        `half_width` would silently invalidate the comparison.
+        """
+        wf, eff_fs = _upsample(np.asarray(wf, dtype=float))
+        trough_i = int(np.argmin(wf))
+        trough = float(wf[trough_i])
+        if trough >= 0:
+            return None
+        after = wf[trough_i:]
+        peak_rel = int(np.argmax(after))
+        peak_i = trough_i + peak_rel
+        peak = float(wf[peak_i])
+        half = trough / 2.0
+        below = np.flatnonzero(wf <= half)
+        half_width = (
+            float((below[-1] - below[0]) / eff_fs) if below.size >= 2 else float("nan")
+        )
+        return {
+            "peak_to_valley": float((peak_i - trough_i) / eff_fs),
+            "peak_trough_ratio": float(peak / trough) if trough else float("nan"),
+            "half_width": half_width,
+        }
+
+    rows = []
+    for u_idx, unit_id in enumerate(gt_sorting.unit_ids):
+        extremum_ch = int(np.argmin(ref_templates[u_idx].min(axis=0)))
+        origin = locs[extremum_ch]
+        dists = np.linalg.norm(locs - origin, axis=1)
+        for target_um in distances_um:
+            ch = int(np.argmin(np.abs(dists - target_um)))
+            ref_f = _features(ref_templates[u_idx][:, ch])
+            cand_f = _features(cand_templates[u_idx][:, ch])
+            if ref_f is None or cand_f is None:
+                continue
+            row = {
+                "unit_id": str(unit_id),
+                "distance_um": float(target_um),
+                "channel_index": ch,
+                "actual_distance_um": float(dists[ch]),
+            }
+            for name, ref_v in ref_f.items():
+                cand_v = cand_f[name]
+                row[f"{name}_reference"] = ref_v
+                row[f"{name}_candidate"] = cand_v
+                row[f"{name}_relative_error"] = (
+                    float(abs(cand_v - ref_v) / abs(ref_v))
+                    if ref_v not in (0.0,) and np.isfinite(ref_v) and np.isfinite(cand_v)
+                    else float("nan")
+                )
+            rows.append(row)
+
+    summary = {}
+    for name in ("peak_to_valley", "peak_trough_ratio", "half_width"):
+        for target_um in distances_um:
+            vals = [
+                r[f"{name}_relative_error"]
+                for r in rows
+                if r["distance_um"] == target_um
+                and np.isfinite(r[f"{name}_relative_error"])
+            ]
+            if vals:
+                summary[f"{name}@{target_um:g}um"] = {
+                    "median_relative_error": float(np.median(vals)),
+                    "p90_relative_error": float(np.percentile(vals, 90)),
+                    "max_relative_error": float(np.max(vals)),
+                    "n": len(vals),
+                    # the paper's only stated tolerance: all distributions
+                    # below 10 % for WavPack Hybrid, "well above 20 %" for the
+                    # bit-truncation settings it rejects
+                    "within_10_percent": bool(np.max(vals) < 0.10),
+                }
+    return {
+        "metric_definition": "buccino2023/spikeinterface-0.97.1",
+        "definition_note": (
+            "half_width uses the OUTERMOST half-amplitude crossings, as in "
+            "SI 0.97.1. Do not overlay SI >=0.104's trough-adjacent "
+            "half_width on Fig 14."
+        ),
+        "ms_before": 3.0,
+        "ms_after": float(ms_after),
+        "upsampling_factor": int(upsampling_factor),
+        "seed": int(seed),
+        "n_units": int(len(gt_sorting.unit_ids)),
+        "per_unit_channel": rows,
+        "summary": summary,
+    }
 
 
 __all__ = [
