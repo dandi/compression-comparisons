@@ -58,3 +58,22 @@ So, while any sweep is in flight:
 * Stage the study-side changes and commit them once the sweep has finished.
 
 The same applies to `datalad save` and anything else that creates a commit.
+
+## /dev/shm is 63 MB on this host — SpikeInterface will SIGBUS
+
+SpikeInterface allocates waveform buffers in POSIX shared memory by default,
+and `format="memory"` does the same. This container ships a 63 MB
+`/dev/shm`, so the allocation succeeds and the first touch past the limit
+kills the process with **SIGBUS — exit 135, no traceback, no catchable
+Python exception**. It looks like a mysterious silent crash and sends you
+looking at your own code.
+
+Build analyzers on disk instead:
+
+    from spikeinterface import create_sorting_analyzer
+    create_sorting_analyzer(sorting, recording, sparse=...,
+                            format="binary_folder", folder=...)
+
+`compbench.metrics.sorting._analyzer_on_disk()` does this; use it rather
+than calling `create_sorting_analyzer` directly. Verified: `format="memory"`
+exits 135, `format="binary_folder"` exits 0 on the same input.
