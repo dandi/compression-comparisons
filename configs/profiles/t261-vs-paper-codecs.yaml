@@ -13,10 +13,19 @@
 #
 # Comparing T.261@whole against general-purpose@1s would be comparing two
 # different measurement conditions. Rather than do that, this profile runs
-# BOTH ARMS AT WHOLE-BUFFER, so every comparison inside it is like-for-like.
-# The cost is that these general-purpose numbers are new cells rather than
-# the 174 already computed — that is the price of a fair comparison, and it
-# is cheaper than making T.261 comparable to them.
+# BOTH ARMS AT THE SAME CHUNK SIZE, so every comparison inside it is
+# like-for-like. The cost is that these general-purpose numbers are new
+# cells rather than the 174 already computed.
+#
+# WHY 60 s AND NOT WHOLE-BUFFER. Whole-buffer was the first attempt and is
+# impossible: numcodecs rejects any buffer over 1.97 GiB
+# ("Codec does not support buffers of > 2113929216 bytes") and a full
+# recording is 30 GiB, so every non-T.261 cell fails. T.261 is exempt only
+# because it shells out to BWC with files rather than passing a buffer.
+# 60 s is 1.29 GiB — under the limit with headroom — and puts T.261 at ~23
+# subprocess spawns per cell instead of the ~1400 that made 1 s chunking
+# prohibitive. Verified by encoding a real 1.29 GiB buffer through
+# blosc-zstd, wavpack, zstd and lzma: all four accept it.
 #
 # Note this makes the CR figures here NOT directly comparable to the paper's
 # 1 s tables. That is acceptable: the paper's own §3.1.2 measured 10 s vs 1 s
@@ -29,7 +38,7 @@
 # all 8. Extend to the full set once the shape of the answer is known.
 
 name: t261-vs-paper-codecs
-chunk_durations_s: [null]        # whole-buffer for EVERY arm — see above
+chunk_durations_s: [60.0]        # 60 s for EVERY arm — see above
 
 datasets_matrix:
   loader: aind-benchmark

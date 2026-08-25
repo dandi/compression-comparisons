@@ -77,3 +77,24 @@ Build analyzers on disk instead:
 `compbench.metrics.sorting._analyzer_on_disk()` does this; use it rather
 than calling `create_sorting_analyzer` directly. Verified: `format="memory"`
 exits 135, `format="binary_folder"` exits 0 on the same input.
+
+## numcodecs rejects buffers over 1.97 GiB — chunk accordingly
+
+`numcodecs` raises `ValueError: Codec does not support buffers of >
+2113929216 bytes` for a single buffer. A full NP1 recording is ~30 GiB, so
+**whole-buffer compression is impossible** for every numcodecs-based codec
+(blosc-*, wavpack, lzma, zstd, gzip, zlib, flac). Only T.261 escapes it, by
+shelling out to BWC with files rather than passing a buffer.
+
+At 384 ch × 30 kHz × int16 the ceiling is a **92 s** chunk. Useful sizes:
+
+    chunk | buffer   | T.261 subprocess spawns per 1400 s cell
+    ----- | -------- | ---------------------------------------
+      1 s | 0.02 GiB | 1400   (prohibitive for T.261)
+     10 s | 0.21 GiB |  140
+     60 s | 1.29 GiB |   23   (the working compromise)
+     90 s | 1.93 GiB |   15   (no headroom)
+
+When a profile compares T.261 against numcodecs codecs, both arms must use
+the same chunk size or the comparison is between two different measurement
+conditions. 60 s satisfies both constraints at once.
