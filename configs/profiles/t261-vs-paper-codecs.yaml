@@ -1,0 +1,87 @@
+# T.261 versus the paper's codec set — the study's actual comparison.
+#
+# WHY THIS PROFILE EXISTS, AND WHY IT IS NOT `paper-real-np1-8`. The
+# reproduction sweep answers "do we reproduce Buccino et al.?" It contains no
+# T.261 at all. This one answers the question the study is for: how does
+# T.261 compare against the codecs that paper tested, measured the same way.
+#
+# THE CHUNKING DECISION (the methodological point of this file).
+# Every completed reproduction cell is at 1 s chunks, because that is the
+# paper's condition. T.261 cannot practically run there: the adapter shells
+# out to BWC once per chunk, so a 1 s chunking of a ~23-minute recording
+# means ~1400 subprocess spawns per cell. So T.261 is whole-buffer.
+#
+# Comparing T.261@whole against general-purpose@1s would be comparing two
+# different measurement conditions. Rather than do that, this profile runs
+# BOTH ARMS AT WHOLE-BUFFER, so every comparison inside it is like-for-like.
+# The cost is that these general-purpose numbers are new cells rather than
+# the 174 already computed — that is the price of a fair comparison, and it
+# is cheaper than making T.261 comparable to them.
+#
+# Note this makes the CR figures here NOT directly comparable to the paper's
+# 1 s tables. That is acceptable: the paper's own §3.1.2 measured 10 s vs 1 s
+# at a median CR ratio of 1.0000 (5-95 pct 0.998-1.004), so the CR effect is
+# sub-1%; but the SPEED metrics (enc/dec xRT) are chunk-size dependent by
+# that same section's title and must not be read across profiles.
+#
+# SCOPE: 4 of the 8 NP1 recordings, 2 per site. Enough for a paired
+# per-recording comparison and a Pareto curve, at roughly half the cost of
+# all 8. Extend to the full set once the shape of the answer is known.
+
+name: t261-vs-paper-codecs
+chunk_durations_s: [null]        # whole-buffer for EVERY arm — see above
+
+datasets_matrix:
+  loader: aind-benchmark
+  params:
+    start_s: 0.0
+
+  recordings:
+    # `vars.lsb`: SpikeGLX (IBL) writes raw ADC values -> LSB 1, where
+    # correct_lsb is a documented no-op. Open Ephys (AIND) rescales -> LSB 12.
+    - label: ibl-CSHZAD026
+      vars: {lsb: 1}
+      params: {path: sourcedata/aind-ephys-compression/ibl-np1/CSHZAD026_2020-09-04_probe00}
+    - label: ibl-CSHZAD029
+      vars: {lsb: 1}
+      params: {path: sourcedata/aind-ephys-compression/ibl-np1/CSHZAD029_2020-09-09_probe00}
+    - label: aind-625749
+      vars: {lsb: 12}
+      params: {path: sourcedata/aind-ephys-compression/aind-np1/625749_2022-08-03_15-15-06_ProbeA}
+    - label: aind-634568
+      vars: {lsb: 12}
+      params: {path: sourcedata/aind-ephys-compression/aind-np1/634568_2022-08-05_15-59-46_ProbeA}
+
+  preprocessing:
+    - label: raw
+    - label: lsb
+      # no-op at lsb=1, so this would be a byte-identical duplicate of `raw`
+      # on the IBL recordings
+      skip_when_vars: {lsb: 1}
+      steps:
+        - kind: lsb_correction
+          lsb: "${lsb}"
+
+codecs:
+  # --- T.261 / H.BWC: the arm under test ------------------------------
+  - {codec: t261, params: {preset: combinedPresetEEG_IndepChannel_lossless}}
+  - {codec: t261, params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 1.5}}
+  - {codec: t261, params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 2.0}}
+  - {codec: t261, params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 3.0}}
+  - {codec: t261, params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 5.0}}
+  - {codec: t261, params: {preset: combinedPresetEEG_IndepChannel, step_size_for_qp: 8.0}}
+
+  # --- WavPack: the paper's lossy winner, the incumbent to beat -------
+  - {codec: wavpack, params: {level: 2}}
+  - {codec: wavpack, params: {level: 2, bps: 6.0}}
+  - {codec: wavpack, params: {level: 2, bps: 4.0}}
+  - {codec: wavpack, params: {level: 2, bps: 3.0}}
+  - {codec: wavpack, params: {level: 2, bps: 2.5}}
+  - {codec: wavpack, params: {level: 2, bps: 2.25}}
+
+  # --- the paper's best lossless codecs, at their best configs --------
+  # Ranking from the capsule: lzma > blosc-zstd > zstd > ... (plan §5).
+  - {codec: lzma, params: {preset: 9, shuffle: byte}}
+  - {codec: blosc-zstd, params: {level: 9, shuffle: bit}}
+  - {codec: zstd, params: {level: 22, shuffle: bit}}
+  - {codec: flac, params: {level: 5}}

@@ -21,7 +21,7 @@
 set -eu
 
 # nothing running -> nothing to protect
-if ! pgrep -f '[c]ompbench run' >/dev/null 2>&1; then
+if ! pgrep -f '[c]ompbench (run|compress|spikesort|compare-sorting)' >/dev/null 2>&1; then
     exit 0
 fi
 
@@ -41,7 +41,7 @@ fi
 outside=$(printf '%s\n' "$staged" | grep -v '^derivatives/' | grep -v '^$' || true)
 [ -n "$outside" ] || exit 0
 
-cells=$(pgrep -af '[c]ompbench run' 2>/dev/null \
+cells=$(pgrep -af '[c]ompbench (run|compress|spikesort|compare-sorting)' 2>/dev/null \
     | grep -oE '\-\-output-dir [^ ]+' | sort -u | wc -l | tr -d ' ')
 
 cat >&2 <<MSG
