@@ -108,5 +108,7 @@ codecs:
   # Ranking from the capsule: lzma > blosc-zstd > zstd > ... (plan §5).
   - {codec: lzma, params: {preset: 9, shuffle: byte}}
   - {codec: blosc-zstd, params: {level: 9, shuffle: bit}}
-  - {codec: zstd, params: {level: 22, shuffle: bit}}
+  # bit-shuffle is a BLOSC feature; standalone codecs accept only 'no'/'byte'.
+  # Same constraint that forces `byte` on the gate profile.
+  - {codec: zstd, params: {level: 22, shuffle: byte}}
   - {codec: flac, params: {level: 5}}
