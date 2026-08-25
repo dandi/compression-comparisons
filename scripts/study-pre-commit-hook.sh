@@ -29,6 +29,17 @@ if [ -n "${COMPBENCH_ALLOW_COMMIT_DURING_SWEEP:-}" ]; then
     exit 0
 fi
 
+# A commit made BY `datalad run` is safe even mid-sweep: it carries a run
+# record, and a concurrent run's dirty-committed check accepts recorded
+# commits (that is the gh-7900 fix). Only PLAIN commits are the hazard.
+# DATALAD_RUN_ANCESTRY is set by `run` in its command's environment, so its
+# presence means this commit will be recorded. Verified: a `datalad run`
+# touching code/ concurrently with a cell writing derivatives/ leaves both
+# at exit 0 with both records intact.
+if [ -n "${DATALAD_RUN_ANCESTRY:-}" ]; then
+    exit 0
+fi
+
 # staged paths, against HEAD or against the empty tree on a first commit
 if git rev-parse --verify HEAD >/dev/null 2>&1; then
     staged=$(git diff --cached --name-only)

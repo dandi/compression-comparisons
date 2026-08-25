@@ -1,0 +1,86 @@
+# Phase 1 gate, Fig 2/6 arm only — the codec-ranking and paired-ratio verdict.
+#
+# WHY A SEPARATE PROFILE. `paper-real-np1-8-general` sweeps 38 configs per
+# recording and got to 174 cells without completing a single codec's row: its
+# best-covered config reaches 7 of 24 dataset-conditions. The gate does not
+# need breadth, it needs ONE config per codec across ALL 8 recordings. This
+# profile is that shape — depth-first where the gate is, at roughly a tenth
+# of the remaining cost.
+#
+# THE GATE (plan §5): our sweep must reproduce the paper's codec ORDERING,
+# and the paired per-recording CR ratio must satisfy
+#     median |ratio - 1| <= 2%  and  max |ratio - 1| <= 5%
+# reported per recording so one bad recording is visible rather than averaged
+# away. Valid only against cells at the paper's conditions: LSB-corrected,
+# 1 s chunks, matching level AND shuffle.
+#
+# SHUFFLE IS `byte`, and that is forced, not chosen. The reference table has
+# no `bit` rows for the non-blosc codecs — bit-shuffle is a blosc feature —
+# so `byte` and `no` are the only settings present for all nine. `byte` is
+# the stronger of the two, so it is the only value that lets every codec be
+# compared at a matching config.
+#
+# CONDITION IS THE PAPER'S, PER RECORDING. SpikeGLX (IBL) writes raw ADC
+# values, lsb=1, where correct_lsb is a documented no-op — so `raw` IS the
+# corrected condition there, and running `lsb` too would be a byte-identical
+# duplicate. Open Ephys (AIND) rescales, lsb=12, so its corrected condition
+# is `lsb`. Hence one condition per recording, 8 in total.
+#
+# Band-pass (Fig 7) is deliberately absent: it doubles the cell count, and
+# the ranking verdict does not need it. Add `bp`/`lsbbp` when Fig 7 is wanted.
+
+name: gate-fig2-corrected
+chunk_durations_s: [1.0]
+
+datasets_matrix:
+  loader: aind-benchmark
+  params:
+    start_s: 0.0
+
+  recordings:
+    - label: ibl-CSHZAD026
+      vars: {lsb: 1}
+      params: {path: sourcedata/aind-ephys-compression/ibl-np1/CSHZAD026_2020-09-04_probe00}
+    - label: ibl-CSHZAD029
+      vars: {lsb: 1}
+      params: {path: sourcedata/aind-ephys-compression/ibl-np1/CSHZAD029_2020-09-09_probe00}
+    - label: ibl-SWC054-probe00
+      vars: {lsb: 1}
+      params: {path: sourcedata/aind-ephys-compression/ibl-np1/SWC054_2020-10-05_probe00}
+    - label: ibl-SWC054-probe01
+      vars: {lsb: 1}
+      params: {path: sourcedata/aind-ephys-compression/ibl-np1/SWC054_2020-10-05_probe01}
+    - label: aind-625749
+      vars: {lsb: 12}
+      params: {path: sourcedata/aind-ephys-compression/aind-np1/625749_2022-08-03_15-15-06_ProbeA}
+    - label: aind-634568
+      vars: {lsb: 12}
+      params: {path: sourcedata/aind-ephys-compression/aind-np1/634568_2022-08-05_15-59-46_ProbeA}
+    - label: aind-634569
+      vars: {lsb: 12}
+      params: {path: sourcedata/aind-ephys-compression/aind-np1/634569_2022-08-09_16-14-38_ProbeA}
+    - label: aind-634571
+      vars: {lsb: 12}
+      params: {path: sourcedata/aind-ephys-compression/aind-np1/634571_2022-08-04_14-27-05_ProbeA}
+
+  preprocessing:
+    # exactly one condition per recording — the paper's, for that hardware
+    - label: raw
+      skip_when_vars: {lsb: 12}    # AIND's corrected condition is `lsb`
+    - label: lsb
+      skip_when_vars: {lsb: 1}     # no-op at lsb=1, would duplicate `raw`
+      steps:
+        - kind: lsb_correction
+          lsb: "${lsb}"
+
+codecs:
+  # the paper's nine general-purpose codecs, level `high`, shuffle `byte`
+  - {codec: lzma,        params: {preset: 9, shuffle: byte}}
+  - {codec: blosc-zstd,  params: {level: 9, shuffle: byte}}
+  - {codec: zstd,        params: {level: 22, shuffle: byte}}
+  - {codec: gzip,        params: {level: 9, shuffle: byte}}
+  - {codec: zlib,        params: {level: 9, shuffle: byte}}
+  - {codec: blosc-zlib,  params: {level: 9, shuffle: byte}}
+  - {codec: blosc-lz4hc, params: {level: 9, shuffle: byte}}
+  - {codec: blosc-lz4,   params: {level: 9, shuffle: byte}}
+  - {codec: lz4,         params: {acceleration: 1, shuffle: byte}}
