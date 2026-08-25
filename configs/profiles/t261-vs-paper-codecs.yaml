@@ -38,9 +38,9 @@
 # sub-1%; but the SPEED metrics (enc/dec xRT) are chunk-size dependent by
 # that same section's title and must not be read across profiles.
 #
-# SCOPE: 4 of the 8 NP1 recordings, 2 per site. Enough for a paired
-# per-recording comparison and a Pareto curve, at roughly half the cost of
-# all 8. Extend to the full set once the shape of the answer is known.
+# SCOPE: 4 of the 8 NP1 recordings, 2 per site, on a 300 s slice (see
+# `duration_s` below). Enough for a paired per-recording comparison and a
+# Pareto curve. Extend to the full set once the shape of the answer is known.
 
 name: t261-vs-paper-codecs
 chunk_durations_s: [10.0]        # 10 s for EVERY arm — see above
@@ -49,6 +49,17 @@ datasets_matrix:
   loader: aind-benchmark
   params:
     start_s: 0.0
+    # 300 s slice, not the full ~23-minute recording. T.261 measured 56 s of
+    # compute per second of recording under sweep-realistic load, so the full
+    # matrix would be ~3.3 days against ~0.7 here. Every comparison INSIDE
+    # this profile stays like-for-like -- both arms see the same slice -- but
+    # these CRs are slice numbers and must not be pooled with full-recording
+    # ones. Plan decision 7 (full recordings, not slices) governs paper
+    # REPRODUCTION, where comparability to published tables is the point;
+    # this profile compares T.261 against our own runs, where internal
+    # consistency is what matters. Widen to the full recording once the shape
+    # of the answer is known.
+    duration_s: 300.0
 
   recordings:
     # `vars.lsb`: SpikeGLX (IBL) writes raw ADC values -> LSB 1, where
