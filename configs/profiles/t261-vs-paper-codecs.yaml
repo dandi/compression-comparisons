@@ -22,10 +22,15 @@
 # ("Codec does not support buffers of > 2113929216 bytes") and a full
 # recording is 30 GiB, so every non-T.261 cell fails. T.261 is exempt only
 # because it shells out to BWC with files rather than passing a buffer.
-# 60 s is 1.29 GiB — under the limit with headroom — and puts T.261 at ~23
-# subprocess spawns per cell instead of the ~1400 that made 1 s chunking
-# prohibitive. Verified by encoding a real 1.29 GiB buffer through
-# blosc-zstd, wavpack, zstd and lzma: all four accept it.
+# 60 s (1.29 GiB) clears that limit and was the first fix, but it broke
+# T.261 the other way: BWC costs ~20 s of compute per second of recording,
+# so a 60 s chunk is ~21 min on an idle box and blew the encoder's 30-minute
+# timeout once 15 cells were competing. 10 s is the size that satisfies both
+# ends: 0.21 GiB per buffer, ~3.4 min per BWC call (safe under load), and
+# 140 spawns per cell whose overhead is negligible against the ~8 h of
+# compute a T.261 cell needs anyway. Verified by encoding a real 1.29 GiB
+# buffer through blosc-zstd, wavpack, zstd and lzma -- all four accept it,
+# so the buffer ceiling is not what constrains us here.
 #
 # Note this makes the CR figures here NOT directly comparable to the paper's
 # 1 s tables. That is acceptable: the paper's own §3.1.2 measured 10 s vs 1 s
@@ -38,7 +43,7 @@
 # all 8. Extend to the full set once the shape of the answer is known.
 
 name: t261-vs-paper-codecs
-chunk_durations_s: [60.0]        # 60 s for EVERY arm — see above
+chunk_durations_s: [10.0]        # 10 s for EVERY arm — see above
 
 datasets_matrix:
   loader: aind-benchmark

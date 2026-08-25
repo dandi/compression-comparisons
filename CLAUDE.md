@@ -97,4 +97,15 @@ At 384 ch × 30 kHz × int16 the ceiling is a **92 s** chunk. Useful sizes:
 
 When a profile compares T.261 against numcodecs codecs, both arms must use
 the same chunk size or the comparison is between two different measurement
-conditions. 60 s satisfies both constraints at once.
+conditions.
+
+**But the buffer ceiling is not the only constraint — T.261 has the opposite
+one.** BWC costs roughly 20 s of compute per second of recording, and each
+chunk is one subprocess call with a wall-clock timeout. A 60 s chunk is
+~21 min on an idle box and exceeds a 30-minute timeout as soon as the
+machine is contended. So the chunk must be large enough to keep the spawn
+count sane and small enough that one call comfortably fits the timeout:
+**10 s** is the size that satisfies both (0.21 GiB, ~3.4 min per call, 140
+spawns per full-recording cell). The timeout itself is
+`COMPBENCH_T261_TIMEOUT_S`, default 2 h — it guards against a hung encoder,
+not a slow one, so never tighten it to just above the expected time.

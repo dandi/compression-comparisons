@@ -132,6 +132,33 @@ def _read_rawh2(path: Path) -> np.ndarray:
     return np.ascontiguousarray(arr, dtype=np.int16)
 
 
+def _bwc_timeout_s() -> float:
+    """Wall-clock limit for one BWC subprocess call.
+
+    This guards against a HUNG encoder, not a slow one, so it must not be
+    tight enough to kill legitimate work. BWC costs roughly 20 s of compute
+    per second of recording, so the wall time of one call scales with the
+    chunk size AND with how contended the machine is: a 60 s chunk measured
+    ~21 min on an idle box and blew the old hardcoded 1800 s under 15-way
+    concurrency. Defaults to 2 h, which no healthy call approaches at the
+    chunk sizes we use; override with COMPBENCH_T261_TIMEOUT_S.
+    """
+    import os
+
+    raw = os.environ.get("COMPBENCH_T261_TIMEOUT_S")
+    if not raw:
+        return 7200.0
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(
+            f"COMPBENCH_T261_TIMEOUT_S must be a number of seconds, got {raw!r}"
+        ) from exc
+    if value <= 0:
+        raise ValueError("COMPBENCH_T261_TIMEOUT_S must be positive")
+    return value
+
+
 class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
     """numcodecs.Codec wrapper around the BWC reference encoder/decoder.
 
@@ -228,7 +255,7 @@ class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
         with stdout_path.open("wb") as f_out, stderr_path.open("wb") as f_err:
             proc = subprocess.Popen(cmd, stdout=f_out, stderr=f_err)
             try:
-                proc.wait(timeout=1800)
+                proc.wait(timeout=_bwc_timeout_s())
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
