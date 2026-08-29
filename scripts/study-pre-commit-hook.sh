@@ -56,16 +56,21 @@ else
         "$(git hash-object -t tree /dev/null)")
 fi
 
-# a commit touching only derivatives/ is what `datalad run` itself makes
-outside=$(printf '%s\n' "$staged" | grep -v '^derivatives/' | grep -v '^$' || true)
+# NO path-based exemption. The obvious rule -- "a commit touching only
+# derivatives/ must be `datalad run`'s own" -- is FALSE, and believing it cost
+# a completed cell on 2026-08-29: a results REPORT written into derivatives/
+# is a plain commit, it passed the path check, and it landed inside a running
+# cell's window. Safety comes from the commit carrying a run record (checked
+# above via DATALAD_RUN_ANCESTRY), never from where it happens to write.
+outside=$(printf '%s\n' "$staged" | grep -v '^$' || true)
 [ -n "$outside" ] || exit 0
 
 cells=$(pgrep -af '[c]ompbench (run|compress|spikesort|compare-sorting)' 2>/dev/null \
     | grep -oE '\-\-output-dir [^ ]+' | sort -u | wc -l | tr -d ' ')
 
 cat >&2 <<MSG
-REFUSED: a sweep is running ($cells cells in flight) and this commit touches
-files outside derivatives/:
+REFUSED: a sweep is running ($cells cells in flight) and this commit is not
+recorded by \`datalad run\`. It touches:
 
 $(printf '%s\n' "$outside" | sed 's/^/  /')
 
