@@ -21,7 +21,15 @@
 set -eu
 
 # nothing running -> nothing to protect
-if ! pgrep -f '[c]ompbench (run|compress|spikesort|compare-sorting)' >/dev/null 2>&1; then
+# The dangerous window is wider than "a cell is running": a sweep's OUTER
+# `datalad run` stays open after its last cell finishes, and a plain commit
+# landing then is rejected as an undeclared change. That is how the
+# 96/96-complete T.261 sweep lost its sweep-level record on 2026-08-29.
+# So watch for the wrapping `datalad run` and for snakemake too, not just
+# for compbench workers.
+if ! pgrep -f '[c]ompbench (run|compress|spikesort|compare-sorting)' >/dev/null 2>&1 \
+   && ! pgrep -f '[s]nakemake -s .*compbench' >/dev/null 2>&1 \
+   && ! pgrep -f '[d]atalad run .*--output derivatives' >/dev/null 2>&1; then
     exit 0
 fi
 
