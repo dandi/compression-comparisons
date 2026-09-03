@@ -32,13 +32,13 @@ Deliberate shaping therefore requires band splitting, not a parameter.
 
 ## Where the redundancy is — two reviews converged independently
 
-| axis | spike band (300-6000 Hz) | LFP (<300 Hz) |
-| ---- | -----------------------: | ------------: |
-| temporal prediction gain | **4.2-4.7 bits** (AR8-16) | 6.4-7.9 bits @30 kHz |
-| cross-channel gain | **0.14-0.67 bits** | **3.2-4.2 bits** |
-| nearest-neighbour correlation | 0.50-0.61 | 0.75-0.96 |
-| low-rank? | no (PC1 = 7-16 %) | yes (top-4 PCs = 55-94 %) |
-| correlation length | 50-100 um | 250-500 um |
+| axis                          |  spike band (300-6000 Hz) |             LFP (<300 Hz) |
+| ----------------------------- | ------------------------: | ------------------------: |
+| temporal prediction gain      | **4.2-4.7 bits** (AR8-16) |      6.4-7.9 bits @30 kHz |
+| cross-channel gain            |        **0.14-0.67 bits** |          **3.2-4.2 bits** |
+| nearest-neighbour correlation |                 0.50-0.61 |                 0.75-0.96 |
+| low-rank?                     |         no (PC1 = 7-16 %) | yes (top-4 PCs = 55-94 %) |
+| correlation length            |                 50-100 um |                250-500 um |
 
 Confirmed empirically from the delta-filter sweep: temporal differencing is
 worth **+18 %** to blosc-zstd and **+0.1 %** to WavPack (which already has a
@@ -68,20 +68,64 @@ reasons the spike case fails are specific and checkable:
 
 ## Ranked hypotheses
 
-Cost is per candidate. "Free" means no encoder-time increase.
+Compact table first; the reasoning for each is below it. "Free" means no
+increase in encoder time.
 
-| # | change | rationale | expected | cost |
-| -: | ------ | --------- | -------- | ---- |
-| **H1** | drop the `LOG2_MAX_BLOCK_SIZE` / `MAX_SPLIT_DEPTH` / `MaxAbsDeltaQP` pins; let auto-config run | the preset overrides the encoder's own lossy defaults | +2-8 % CR at equal distortion; possible FP reduction | free |
-| **H2** | LSB-correct every Open Ephys input; test `cgps_allow_zero_lsb_flag=1` in the lossy preset | T.261 pays **3.43 bits/sample** for zero information and exploits the lattice least of all codecs tested | lossless CR 2.01 -> 3.53, already demonstrated | free |
-| **H3** | `IntraPeriod` >= chunk length | 98304 samples = 3.28 s here vs 384 s at EEG rates; adaptive state is destroyed ~3x per 10 s chunk | unquantified; explains why chunk size 10 s vs 60 s changes nothing today | free |
-| **H4** | `MAX_SPLIT_DEPTH=4..6` with `LOG2_MAX_BLOCK_SIZE=10`, `MaxAbsDeltaQP=1..3` | DCT gain saturates by N=64, but per-block **adaptivity** is worth +0.12 (AP) to +0.36 (wideband) bits | +0.10-0.15 bits/sample | encoder time |
-| **H5** | band-split: code <300 and 300-6000 Hz as separate streams with independent QP | the only route to shaped error, given no weighting knob exists. 50 % of spike-discriminative energy is below 1 kHz, 80 % below 1.33 kHz | the big one: potentially 2-3x usable CR at fixed sorting fidelity | adapter work; changes the artifact |
-| **H6** | `ChannelDistortionScaleFactor` 0.5, 1.0 | equalises error-to-noise across channels whose sigma spans 4.5x (IBL) to 20x (NP2); matches the sorter's per-channel k*MAD threshold | FP reduction at matched CR | needs seekable input; forces `max_abs_delta_qp_idx=7` |
-| **H7** | decorrelate the error at fixed RMSE: `TrellisQuantDelay>0`, `PerceptMode 1-3`, `QuantMode 0` vs `2` | FP inflation tracks error *structure*, not magnitude; none swept | FP headroom for free | encoder time |
-| **H8** | buy back compute: `BMNumCandsFullRD`, `LMNumCandsFullRD`, `UseMultHypPreSearch*` | lossy is **4.2x more expensive than lossless** (52.3x vs 12.5x realtime), so the cost is encoder search; distortion is already at the uniform-quantiser bound so search has little to protect | large speedup, small rate loss | free (negative) |
-| **H9** | LFP profile: `ChannelGroupSize=0` or `AutoChannelGroup`, `LOG2_MAX_BLOCK_SIZE=11-13`, low `LMS_ORDER`, high `MaxAbsDeltaQP` | opposite prescription to spikes; cross-channel alone is worth 3.2-4.2 bits | substantial | joint-channel may be infeasible — verify cost first |
-| **H10** | try the **ACoM** and **EMG** presets as-is | ACoM is the only family tuned on kHz-rate data and the only one enabling block splitting; EMG is spiky broadband | free reference points | free |
+|   # | change                                              | expected                       | cost                 |
+| --: | --------------------------------------------------- | ------------------------------ | -------------------- |
+|  H1 | drop the block-size / split-depth / delta-QP pins   | +2-8 % CR at equal distortion  | free                 |
+|  H2 | LSB-correct every Open Ephys input                  | CR 2.01 -> 3.53 (demonstrated) | free                 |
+|  H3 | `IntraPeriod` >= chunk length                       | unquantified                   | free                 |
+|  H4 | `MAX_SPLIT_DEPTH=4..6`, `MaxAbsDeltaQP=1..3`        | +0.10-0.15 bits/sample         | encoder time         |
+|  H5 | band-split <300 / 300-6000 Hz at independent QP     | up to 2-3x usable CR           | adapter work         |
+|  H6 | `ChannelDistortionScaleFactor` 0.5, 1.0             | FP reduction at matched CR     | needs seekable input |
+|  H7 | decorrelate error at fixed RMSE                     | FP headroom                    | encoder time         |
+|  H8 | cut encoder search effort                           | large speedup, small rate loss | free                 |
+|  H9 | LFP profile: joint channels, long blocks, low order | substantial                    | may be infeasible    |
+| H10 | try the ACoM and EMG presets as-is                  | free reference points          | free                 |
+
+**H1 — drop the pins.** The preset overrides the encoder's own lossy
+defaults (§"Two verified findings"). Deleting three lines restores block
+splitting, 256-sample blocks and per-block QP adaptation.
+
+**H2 — LSB correction.** T.261 pays 3.43 bits/sample for zero information
+and exploits the lattice least of all codecs tested. Note AIND NP1 is a
+12-ADU lattice with +-1 jitter, so `cgps_allow_zero_lsb_flag` can capture at
+most 2 of those 3.43 bits even when enabled — external correction is the
+real fix.
+
+**H3 — `IntraPeriod`.** 98304 samples is 3.28 s here against 384 s at EEG
+rates, so adaptive state is destroyed ~3x per 10 s chunk. This also explains
+why chunk size 10 s vs 60 s changes nothing today.
+
+**H4 — adaptive splitting.** DCT gain saturates by N=64, so a short *fixed*
+block buys little; the win is per-block **adaptivity**, worth +0.12 bits on
+AP-band and +0.36 on wideband. Splitting lets RD pick long blocks in quiet
+stretches and short ones on events, collecting both terms.
+
+**H5 — band splitting.** The only route to shaped error, since no
+frequency-weighting knob exists. 50 % of spike-discriminative energy is
+below 1 kHz and 80 % below 1.33 kHz, so the 300-6000 Hz band is about twice
+as wide as the informative one.
+
+**H6 — per-channel distortion.** Equalises error-to-noise across channels
+whose sigma spans 4.5x (IBL) to 20x (NP2), matching the sorter's own
+per-channel k*MAD threshold. Forces `max_abs_delta_qp_idx=7`.
+
+**H7 — error structure.** FP inflation tracks the *structure* of the error,
+not its magnitude. `TrellisQuantDelay>0`, `PerceptMode 1-3` and
+`QuantMode 0` vs `2` all attack this and none has been swept.
+
+**H8 — buy back compute.** Lossy is 4.2x *more* expensive than lossless
+(52.3x vs 12.5x realtime), so the cost is encoder search — and distortion is
+already at the uniform-quantiser bound, so search has little to protect.
+
+**H9 — LFP.** The opposite prescription to spikes: cross-channel prediction
+alone is worth 3.2-4.2 bits. Verify cost first — the joint-channel preset
+timed out twice.
+
+**H10 — untried presets.** ACoM is the only family tuned on kHz-rate data
+and the only one enabling block splitting; EMG is spiky broadband.
 
 **Do not pursue**, on the evidence:
 
@@ -118,13 +162,19 @@ Distortion is exactly `rmse = QP/sqrt(12)` (measured 0.91-1.06x across 30
 lossy cells), so **distortion needs no measurement — only rate does.** That
 collapses the search.
 
-| rung | substrate | gate | budget |
-| ---- | --------- | ---- | ------ |
-| 0 | 10 s, 1 chunk | validity; re-encode byte-identical; **cost <= 1.5x stock**; projected chunk time <= timeout/4 | ~0.3 cell-h each |
-| 1 | 60 s MEArec, 4 QP points | rate at matched distortion; per-channel PRDN max | ~3.5 cell-h each |
-| 2 | second window + MEArec NP2 + one real LSB-corrected recording | rank stability across window and substrate | ~10 cell-h each |
-| 3 | **600 s MEArec, sorting** | FP <= 126+17, well-detected >= 96-4, plus CR > stock at equal waveform p90 | ~19 cell-h + 3.5 h GPU each |
-| 4 | real recordings, no ground truth | agreement against a lossless-baseline sorting | confirmation only |
+| rung | substrate                        | gate                          | budget each            |
+| ---- | -------------------------------- | ----------------------------- | ---------------------- |
+| 0    | 10 s, 1 chunk                    | validity, determinism, cost   | ~0.3 cell-h            |
+| 1    | 60 s MEArec, 4 QP points         | rate at matched distortion    | ~3.5 cell-h            |
+| 2    | 2nd window + NP2 + one real rec  | rank stability                | ~10 cell-h             |
+| 3    | **600 s MEArec, sorting**        | FP and well-detected bounds   | ~19 cell-h + 3.5 h GPU |
+| 4    | real recordings, no ground truth | agreement vs lossless sorting | confirmation only      |
+
+Rung 0 rejects a candidate whose encode cost exceeds 1.5x stock or whose
+projected chunk time exceeds a quarter of the timeout — a cost gate that does
+not exist today, and whose absence already cost one abandoned arm. Rung 3's
+gate is FP <= 126+17 and well-detected >= 96-4, plus CR strictly greater than
+stock at equal waveform p90.
 
 Rungs 1-2 are **sorter-free by design**: short slices are *biased*, not
 merely noisy — 6 of 10 arms reversed the sign of an endpoint between 100 s
@@ -145,11 +195,11 @@ design cannot be falsified.
 Express the target as **error-to-noise ratio per channel**, never absolute
 uV and never bps:
 
-| error RMS / sigma_noise | outcome |
-| ----------------------: | ------- |
-| <= 0.15 | FP inflation under ~10 % |
-| <= 0.33 | practical edge (+58 FP at QP 8.0) |
-| 0.54-0.63 | **cliff** — well-detected collapses 100 -> 77 |
+| error RMS / sigma_noise | outcome                                       |
+| ----------------------: | --------------------------------------------- |
+|                 <= 0.15 | FP inflation under ~10 %                      |
+|                 <= 0.33 | practical edge (+58 FP at QP 8.0)             |
+|               0.54-0.63 | **cliff** — well-detected collapses 100 -> 77 |
 
 `step_size_for_qp` is an absolute step in ADC counts, so a fixed QP delivers
 2.2x different relative quality across our recordings. Every cross-recording
