@@ -25,8 +25,19 @@ def _cell(tmp_path, codec, provenance=None, metrics=None):
 
 
 def test_every_codec_param_becomes_its_own_column(tmp_path):
+    """Values are STRINGIFIED, deliberately.
+
+    The same parameter name carries different types across codecs -- `lzma`
+    takes `preset: 9`, `t261` takes `preset: "combinedPresetEEG_..."` -- and
+    both land in one `codec_param_preset` column. An untyped mix makes the
+    parquet write raise `ArrowTypeError: Expected bytes, got a 'int' object`
+    and takes the entire report down, which is how a completed 96-cell sweep
+    ended up with no aggregate at all. These columns exist to make a
+    condition mismatch visible in the table; strings do that job, and
+    arithmetic on a codec parameter would be a mistake regardless.
+    """
     row = _cell(tmp_path, {"name": "lzma", "params": {"preset": 9, "shuffle": "no"}})
-    assert row["codec_param_preset"] == 9
+    assert row["codec_param_preset"] == "9"
     assert row["codec_param_shuffle"] == "no"
 
 

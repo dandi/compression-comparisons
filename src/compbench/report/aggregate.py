@@ -118,7 +118,16 @@ def _join_keys(manifest: dict[str, Any]) -> dict[str, Any]:
         "codec_filters": json.dumps(codec.get("filters")) if codec.get("filters") else None,
     }
     for key, value in (codec.get("params") or {}).items():
-        out[f"codec_param_{key}"] = value
+        # Stringify. The same parameter NAME carries different types across
+        # codecs -- `lzma` takes `preset: 9` (int) while `t261` takes
+        # `preset: "combinedPresetEEG_..."` (str) -- and both flatten into one
+        # `codec_param_preset` column. Parquet cannot type that column, and
+        # the whole report dies with
+        #   ArrowTypeError: Expected bytes, got a 'int' object
+        # taking every other codec's row down with it. These columns exist to
+        # make a condition mismatch visible in the table, which is a job
+        # strings do; arithmetic on them would be a mistake anyway.
+        out[f"codec_param_{key}"] = None if value is None else str(value)
     for key in ("blosc_nthreads", "wavpack_numcodecs_version", "bwc"):
         if key in codec:
             out[f"codec_{key}"] = (
