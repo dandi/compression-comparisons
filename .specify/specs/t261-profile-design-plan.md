@@ -103,6 +103,14 @@ block buys little; the win is per-block **adaptivity**, worth +0.12 bits on
 AP-band and +0.36 on wideband. Splitting lets RD pick long blocks in quiet
 stretches and short ones on events, collecting both terms.
 
+Two hard constraints, both verified at source and both easy to get wrong:
+`MaxAbsDeltaQP+1` must be a power of two, so the legal values are
+**0, 1, 3, 7, 15, 31, 63, 127** — not a range
+(`StreamPacketBuilder.cpp:127`). And `MAX_SPLIT_DEPTH <= LOG2_MAX_BLOCK_SIZE
+- 4` (`:79`), so depth is capped at **4** once H1 restores the auto block
+size of 8. **H1 and a depth above 4 cannot both hold**; state the block size
+each depth assumes.
+
 **H5 — band splitting.** The only route to shaped error, since no
 frequency-weighting knob exists. 50 % of spike-discriminative energy is
 below 1 kHz and 80 % below 1.33 kHz, so the 300-6000 Hz band is about twice
@@ -130,37 +138,53 @@ and the only one enabling block splitting; EMG is spiky broadband.
 **Do not pursue**, on the evidence:
 
 * **Raising `LMS_ORDER`.** AR16 = 4.72 bits vs AR32 = 4.74 — saturated.
-* **T.261 lossless.** WavPack lossless matches its CR (3.595 vs 3.563) at
-  **1/24 the encode cost and 1/14 the decode cost**.
+* **T.261 lossless.** WavPack lossless costs **1/37 the encode and 1/15 the
+  decode** (paired per-recording medians). Note the CR comparison is closer
+  than the pooled medians suggest: those medians straddle a bimodal raw/LSB
+  population, and **paired, T.261 lossless wins 5 of 6 recordings** (3.112 vs
+  3.071). The case against it is cost, not compression.
 * **QP < 5.** Below CR 7.16 WavPack Hybrid does the same job for ~1/72 the
   compute. T.261's only defensible territory is **CR > 7.16**, above
   WavPack's hard rate ceiling.
 
-## Blocking work
+## Enabling work — smaller than it first appeared
 
-`T261Adapter` — the class profiles actually reach — takes only `preset`,
-`bit_depth`, `step_size_for_qp`, `max_abs_delta_qp`. `T261Codec` already
-supports `extra_args` but the adapter does not forward it, so every
-hypothesis above except H2/H10 raises `TypeError` before the encoder runs.
+**The cfg-level hypotheses need no code changes.** `_resolve_cfg_dir()`
+(`t261.py:76`) already honours a **`BWC_CFG_DIR`** environment variable, so
+candidate `.cfg` files can live in the tool repo and be selected with
+`preset=<candidate>`. H1, H3, H4, H6, H7, H8 and H9 are all cfg-level and
+runnable today. Do not gate the programme on an adapter refactor. Two
+qualifications: `BWC_CFG_DIR` is process-global, so all candidates in a
+sweep must share one directory; and `describe()` records the cfg *path* but
+not its bytes, so the one genuinely needed edit is a **cfg sha256 in the
+manifest** — otherwise candidate identity is a filename.
 
-Three edits unlock the space: forward `**overrides` as `extra_args`, add a
-`cfg_dir` parameter so candidate cfgs live in the tool repo (never patch the
-`src/bwc/` subdataset), and record the cfg sha256 in `describe()` so
-candidate identity is not a filename.
+`T261Adapter` still cannot forward arbitrary `--Key=Value` overrides, which
+matters only for H5 (band splitting) and for anything wanting a per-cell
+override rather than a per-cfg one.
 
-Two free wins in the same edit:
+Two operational notes, corrected:
 
-* **Suppress the `.rec` file.** `WRITE_ENC_REC=1` means every encode also
-  writes a full reconstructed PCM file — **220 MB per 10 s chunk**, verified
-  on disk, inside the timed region. `--BitstreamFile=-` suppresses it.
-* **Skip the pre-analysis passes**, which re-read the input four times.
-  Requires an explicit `--RerefMode=0`; verify a round-trip first.
+* **The `.rec` file is a disk win, not a time win.** `WRITE_ENC_REC=1` writes
+  a full reconstructed PCM file — 220 MB per 10 s chunk, verified on disk —
+  but against ~456 s of encode that is ~0.5 MB/s, well under 1 % of the timed
+  region. Suppressing it also is not free: `--BitstreamFile=-` sends the
+  bitstream to **stdout**, requires an added `--LogFile=`, and collides with
+  the progress tailer.
+* **Skipping the pre-analysis costs two full re-reads, not four**, and the
+  remedy is `--InputFileLength=<n_samples>` — which the adapter already
+  knows and does not pass. `--RerefMode=0` does nothing here; it is consulted
+  after both passes have already run and already defaults to 0.
 
 ## Staged search
 
-Distortion is exactly `rmse = QP/sqrt(12)` (measured 0.91-1.06x across 30
-lossy cells), so **distortion needs no measurement — only rate does.** That
-collapses the search.
+`rmse = QP/sqrt(12)` holds to 0.91-1.06x across 30 lossy cells — **but only
+for the stock preset**, because `MaxAbsDeltaQP=0` and
+`ChannelDistortionScaleFactor=0` make the step uniform over every block and
+channel. H4, H6, H7 and H5 each break that by construction, which is four of
+the ten hypotheses and includes the highest-ranked ones after H1-H3.
+**Measure distortion for every candidate**; `rmse` is already in every
+`metrics.json`, so this costs nothing but must not be skipped.
 
 | rung | substrate                        | gate                          | budget each            |
 | ---- | -------------------------------- | ----------------------------- | ---------------------- |
@@ -182,10 +206,19 @@ and 600 s, and a biased proxy cannot be averaged out. Sorting is 600 s or it
 is not evidence.
 
 **Ranking uses rate at matched distortion; the waveform-feature p90 is the
-acceptance gate, not the ranking metric.** Within T.261, band-limited RMSE
-predicts FP inflation perfectly (Spearman +1.000, n=5) and the expensive
-waveform metric predicts it *worse* (+0.600) — but p90 is the paper's
-published criterion, so it decides pass/fail. Different jobs.
+acceptance gate, not the ranking metric.**
+
+An earlier draft justified this with "band-limited RMSE predicts FP
+inflation perfectly (Spearman +1.000, n=5)". That is **tautological and must
+not be relied on**: the five points are one monotone QP sweep, band-limited
+RMSE is strictly increasing in QP, so *any* monotone function of QP scores
++1.000. It says nothing about ranking candidates that differ in block size,
+split depth or quantiser — which is the whole job of rungs 1-2. Worse, four
+of the five FP inflations (+3, +7, +12, +19) sit inside the study's own
+stated +-17 noise floor; only QP 8.0's +58 clears it. The concordance
+between the cheap gate and the sorting endpoint is therefore **assumed, not
+demonstrated** — which is exactly why the two carried-forward rejected
+candidates at rung 3 are mandatory rather than nice to have.
 
 Carry **2 rejected candidates into rung 3 anyway.** Without them the staged
 design cannot be falsified.
@@ -228,3 +261,72 @@ recording from the bandpassed per-channel MAD instead.
 * **There is no LFP data in this repo.** All AIND streams are `AP*`. An LFP
   target needs a decision first: fetch the NP1 LF stream (2.5 kHz), or derive
   it by low-pass from NP2 wideband. Only the first is what anyone stores.
+
+## What the adversarial review changed
+
+An independent reviewer checked every load-bearing claim against source and
+committed data. **Both headline findings were confirmed** — the preset does
+override the encoder's lossy defaults, and no frequency-weighting mechanism
+exists in BWC. So did `rmse = QP/sqrt(12)`, the cost ratios, the in-band
+error fractions, the delta-filter result, the `IntraPeriod` mis-scaling, and
+the ADC-multiplexing argument (which it found *stronger* than stated:
+`Prediction.h:795-830` reads the previous channel at the same index with no
+offset search at all, and a fractional-sample skew is not diagonal in the
+DCT, so the codec cannot compensate even in principle).
+
+What it refuted or sharpened, beyond the inline fixes above:
+
+* **The mechanism in finding 2 is not load-bearing for sorting.** At matched
+  CR, T.261 carries ~2x *lower* in-band error than WavPack (0.80-0.82 vs
+  1.34-1.74) and still produces **more** false positives (+19 at CR 8.58 vs
+  +5 at CR 7.10). Spectrally flat error explains T.261's lower waveform
+  error; it does not explain the sorting endpoint, and this plan should not
+  imply it does. Most of the T.261/WavPack in-band gap is WavPack's error
+  being *actively* signal-weighted, not T.261's being shaped.
+* **A cheaper route to shaped error than H5.** `TrQuant::quant()` takes a
+  scalar RD lambda per block (`PredictionEnc.h:665`). Making it a vector over
+  coefficient index — biasing RDOQ to preserve 300-6000 Hz — is an
+  encoder-only change that leaves the bitstream conforming and the stock
+  decoder unaffected. ~10 lines against H5's whole band-split adapter. The
+  "never patch `src/bwc/`" rule protects the subdataset pin; it is repo
+  hygiene, not a research constraint, and a branch satisfies it.
+* **A free arm the plan missed.** `cgps_allow_zero_lsb_flag` is **0 in the
+  lossy preset** and 1 in the lossless one, so every lossy T.261 number in
+  this study was produced with zero-LSB detection off. Flipping it is a
+  one-line arm and the natural companion to H2.
+* **The error-budget cliff is at 0.54, not 0.54-0.63**, if judged on FP —
+  the plan's own gate metric. bittrunc-4 sits at 0.54 with well-detected 100
+  but **FP 353 against a baseline of 126**. The table showed only the
+  well-detected collapse. Also `<=0.15 -> under ~10 %` is violated by WavPack
+  4.0 bps (0.120, +17 FP = 13.5 %), and no T.261 arm exceeds 0.33, so the
+  cliff region is extrapolated from a different, non-dithered error process.
+* **H1 is not free and changes a fourth thing.** `Log2FrameLength` defaults
+  to `LOG2_MAX_BLOCK_SIZE + 3`, so dropping the block pin shrinks the frame
+  from 8192 to 2048 samples — 4x more frequent frame boundaries, which could
+  hurt. Restoring split depth and delta-QP search is additional RD search by
+  definition.
+* **ACoM is not the only preset enabling splitting** — ECG and lossless EMG
+  set `MAX_SPLIT_DEPTH: 1`; only the EEG family and lossy EMG pin it to 0.
+  And there is **no lossy ACoM preset**, so H10 gives a lossless reference
+  point only.
+* **The joint-channel timeout is a cost, not a block.** It was the *lossless*
+  preset against a 1800 s limit that no longer exists — the default is now
+  7200 s, so the arm is runnable at >180x realtime.
+* **H6 equalises against the wrong sigma.** `analyzeOriginal` accumulates
+  **wideband** per-channel variance, while the sorter's threshold is on the
+  300-6000 Hz bandpass. On LFP-dominated real data these diverge; on MEArec
+  (no LFP) they coincide, so a MEArec test of H6 will look good and
+  generalise badly.
+* **The `inter_sample_shift` remedy is under-powered.** BWC ships exactly two
+  prediction filters, one zero-shift and one **half**-sample
+  (`CommonROM.h:51-54`). One half-sample option cannot cover 12 phases
+  spanning 0.92 samples. Resampling channels onto a common time base before
+  encoding is the cheaper, codec-independent experiment — and would help
+  blosc and WavPack cross-channel too.
+* **The four source reviews are not committed**, so every number in "Where
+  the redundancy is", the MEArec spectral caveat, and the per-channel sigma
+  spans are unverifiable from this repo. Commit the reviews or their
+  computations before anyone relies on them.
+* **LFP is a stub, correctly.** Fetching the NP1 LF stream is a prerequisite
+  work item, not a caveat, and H9 is unactionable until it exists.
+
