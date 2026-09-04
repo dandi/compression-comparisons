@@ -1,0 +1,122 @@
+{
+  "r0-h1-auto": {
+    "cr": 6.0778754701879025,
+    "decode_time_s": 38.657326720654964,
+    "encode_time_s": 1448.3605796545744,
+    "encoded_bytes": 37907983,
+    "n_chunks": 1,
+    "prdn_per_channel_median_percent": 13.117703042768929,
+    "raw_bytes": null,
+    "rmse": 1.066144383039235,
+    "rmse_band_limited_300_6000": 0.5124173891037992,
+    "round_trip_exact": null
+  },
+  "r0-h1-auto-framepin": {
+    "cr": 6.145459997416453,
+    "decode_time_s": 38.82816018536687,
+    "encode_time_s": 1426.4123792648315,
+    "encoded_bytes": 37491091,
+    "n_chunks": 1,
+    "prdn_per_channel_median_percent": 13.111976949934398,
+    "raw_bytes": null,
+    "rmse": 1.1136511678308927,
+    "rmse_band_limited_300_6000": 0.5209266812934575,
+    "round_trip_exact": null
+  },
+  "r0-h1-zerolsb": {
+    "cr": 6.0778754701879025,
+    "decode_time_s": 39.78066599741578,
+    "encode_time_s": 1439.3376929871738,
+    "encoded_bytes": 37907983,
+    "n_chunks": 1,
+    "prdn_per_channel_median_percent": 13.117703042768929,
+    "raw_bytes": null,
+    "rmse": 1.066144383039235,
+    "rmse_band_limited_300_6000": 0.5124173891037992,
+    "round_trip_exact": null
+  },
+  "r0-h3-intra": {
+    "cr": 6.221416822370854,
+    "decode_time_s": 38.58177725598216,
+    "encode_time_s": 427.01673025265336,
+    "encoded_bytes": 37033365,
+    "n_chunks": 1,
+    "prdn_per_channel_median_percent": 13.104290262412889,
+    "raw_bytes": null,
+    "rmse": 0.8680021311337766,
+    "rmse_band_limited_300_6000": 0.5012355253819132,
+    "round_trip_exact": null
+  },
+  "r0-h4-b10d4": {
+    "cr": 6.203220909377647,
+    "decode_time_s": 36.33036136999726,
+    "encode_time_s": 2961.8387052230537,
+    "encoded_bytes": 37141995,
+    "n_chunks": 1,
+    "prdn_per_channel_median_percent": 13.090834506550163,
+    "raw_bytes": null,
+    "rmse": 0.8692888466777503,
+    "rmse_band_limited_300_6000": 0.5005942060110223,
+    "round_trip_exact": null
+  },
+  "r0-h4-b10d6": {
+    "cr": 6.203480626508464,
+    "decode_time_s": 38.10741613060236,
+    "encode_time_s": 5901.609116058797,
+    "encoded_bytes": 37140440,
+    "n_chunks": 1,
+    "prdn_per_channel_median_percent": 13.090552909426087,
+    "raw_bytes": null,
+    "rmse": 0.8692316710271587,
+    "rmse_band_limited_300_6000": 0.5006023521202054,
+    "round_trip_exact": null
+  },
+  "r0-h4-b8d4": {
+    "cr": 6.150684235590748,
+    "decode_time_s": 40.05511586740613,
+    "encode_time_s": 3257.0393030680716,
+    "encoded_bytes": 37459247,
+    "n_chunks": 1,
+    "prdn_per_channel_median_percent": 13.121608559147994,
+    "raw_bytes": null,
+    "rmse": 1.5668640002051515,
+    "rmse_band_limited_300_6000": 0.5509128512338574,
+    "round_trip_exact": null
+  },
+  "r0-h8-fast": {
+    "cr": 6.209383148720521,
+    "decode_time_s": 41.13455329462886,
+    "encode_time_s": 250.48194472119212,
+    "encoded_bytes": 37105135,
+    "n_chunks": 1,
+    "prdn_per_channel_median_percent": 13.113146681689946,
+    "raw_bytes": null,
+    "rmse": 0.8687338227910267,
+    "rmse_band_limited_300_6000": 0.5013369656571436,
+    "round_trip_exact": null
+  },
+  "r0-stock": {
+    "cr": 6.2092834123117,
+    "decode_time_s": 40.86092805489898,
+    "encode_time_s": 407.8902516104281,
+    "encoded_bytes": 37105731,
+    "n_chunks": 1,
+    "prdn_per_channel_median_percent": 13.113146681689946,
+    "raw_bytes": null,
+    "rmse": 0.8686594976840273,
+    "rmse_band_limited_300_6000": 0.5012978653283092,
+    "round_trip_exact": null
+  },
+  "r0-zerolsb": {
+    "cr": 6.2092834123117,
+    "decode_time_s": 39.25984504446387,
+    "encode_time_s": 405.2706279680133,
+    "encoded_bytes": 37105731,
+    "n_chunks": 1,
+    "prdn_per_channel_median_percent": 13.113146681689946,
+    "raw_bytes": null,
+    "rmse": 0.8686594976840273,
+    "rmse_band_limited_300_6000": 0.5012978653283092,
+    "round_trip_exact": null
+  }
+}
