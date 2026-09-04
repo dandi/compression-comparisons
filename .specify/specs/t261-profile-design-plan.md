@@ -71,18 +71,18 @@ reasons the spike case fails are specific and checkable:
 Compact table first; the reasoning for each is below it. "Free" means no
 increase in encoder time.
 
-|   # | change                                              | expected                       | cost                 |
-| --: | --------------------------------------------------- | ------------------------------ | -------------------- |
-|  H1 | drop the block-size / split-depth / delta-QP pins   | +2-8 % CR at equal distortion  | free                 |
-|  H2 | LSB-correct every Open Ephys input                  | CR 2.01 -> 3.53 (demonstrated) | free                 |
-|  H3 | `IntraPeriod` >= chunk length                       | unquantified                   | free                 |
-|  H4 | `MAX_SPLIT_DEPTH=4..6`, `MaxAbsDeltaQP=1..3`        | +0.10-0.15 bits/sample         | encoder time         |
-|  H5 | band-split <300 / 300-6000 Hz at independent QP     | up to 2-3x usable CR           | adapter work         |
-|  H6 | `ChannelDistortionScaleFactor` 0.5, 1.0             | FP reduction at matched CR     | needs seekable input |
-|  H7 | decorrelate error at fixed RMSE                     | FP headroom                    | encoder time         |
-|  H8 | cut encoder search effort                           | large speedup, small rate loss | free                 |
-|  H9 | LFP profile: joint channels, long blocks, low order | substantial                    | may be infeasible    |
-| H10 | try the ACoM and EMG presets as-is                  | free reference points          | free                 |
+|   # | change                                              | expected                       | cost                 | Rung 0 measured           |
+| --: | --------------------------------------------------- | ------------------------------ | -------------------- | ------------------------- |
+|  H1 | drop the block-size / split-depth / delta-QP pins   | +2-8 % CR at equal distortion  | free                 | **refuted** -2.1 %, 3.5x  |
+|  H2 | LSB-correct every Open Ephys input                  | CR 2.01 -> 3.53 (demonstrated) | free                 | untested (needs AIND)     |
+|  H3 | `IntraPeriod` >= chunk length                       | unquantified                   | free                 | +0.2 %, 1.05x             |
+|  H4 | `MAX_SPLIT_DEPTH=4..6`, `MaxAbsDeltaQP=1..3`        | +0.10-0.15 bits/sample         | encoder time         | **refuted** -0.1 %, 7-14x |
+|  H5 | band-split <300 / 300-6000 Hz at independent QP     | up to 2-3x usable CR           | adapter work         | not run at rung 0         |
+|  H6 | `ChannelDistortionScaleFactor` 0.5, 1.0             | FP reduction at matched CR     | needs seekable input | not run at rung 0         |
+|  H7 | decorrelate error at fixed RMSE                     | FP headroom                    | encoder time         | not run at rung 0         |
+|  H8 | cut encoder search effort                           | large speedup, small rate loss | free                 | **+0.0 %, 0.61x**         |
+|  H9 | LFP profile: joint channels, long blocks, low order | substantial                    | may be infeasible    | not run at rung 0         |
+| H10 | try the ACoM and EMG presets as-is                  | free reference points          | free                 | not run at rung 0         |
 
 **H1 — drop the pins.** The preset overrides the encoder's own lossy
 defaults (§"Two verified findings"). Deleting three lines restores block
@@ -175,6 +175,72 @@ Two operational notes, corrected:
   remedy is `--InputFileLength=<n_samples>` — which the adapter already
   knows and does not pass. `--RerefMode=0` does nothing here; it is consulted
   after both passes have already run and already defaults to 0.
+
+## Rung 0 results — measured 2026-09-04
+
+Ten candidates, one 10 s slice of `ibl-CSHZAD026` raw at QP 3.0, one chunk,
+outside DataLad. `BWC_CFG_DIR` made the candidate cfgs resolvable with no
+code change.
+
+| candidate             | tests |     CR | vs stock | enc s |   cost |
+| --------------------- | ----- | -----: | -------: | ----: | -----: |
+| `r0-h3-intra`         | H3    | 6.2214 |   +0.2 % |   427 |  1.05x |
+| `r0-h8-fast`          | H8    | 6.2094 |   +0.0 % |   250 |  0.61x |
+| `r0-stock`            | --    | 6.2093 |     --   |   408 |  1.00x |
+| `r0-zerolsb`          | H2    | 6.2093 |   +0.0 % |   405 |  0.99x |
+| `r0-h4-b10d6`         | H4    | 6.2035 |   -0.1 % |  5902 | 14.47x |
+| `r0-h4-b10d4`         | H4    | 6.2032 |   -0.1 % |  2962 |  7.26x |
+| `r0-h4-b8d4`          | H4    | 6.1507 |   -0.9 % |  3257 |  7.99x |
+| `r0-h1-auto-framepin` | H1    | 6.1455 |   -1.0 % |  1426 |  3.50x |
+| `r0-h1-auto`          | H1    | 6.0779 |   -2.1 % |  1448 |  3.55x |
+| `r0-h1-zerolsb`       | H1    | 6.0779 |   -2.1 % |  1439 |  3.53x |
+
+**No candidate improved CR.** The spread from best to worst is 2.3 %, and the
+two arms above stock are +0.2 % and +0.0 % — at n=1 recording, n=1 QP, n=1
+window, neither is a result. The *cost* column is where the signal is: it
+spans 24x and is unambiguous.
+
+**H1 and H4 are refuted, and they fail the same way.** Both restore block
+splitting; both cost multiples of stock and land at or below it. The
+progression is monotone in split depth and monotone in the wrong direction:
+
+    depth 0 (stock)   408 s   CR 6.2093
+    depth 2 (H1)     1448 s   CR 6.0779
+    depth 4 (H4)     2962 s   CR 6.2032
+    depth 6 (H4)     5902 s   CR 6.2035
+
+14x the encode time to arrive 0.1 % below the profile you started from. The
+reasoning behind both — the preset overrides the encoder's own defaults,
+therefore the defaults are better — inferred quality from provenance. The
+pins are more plausibly the *output* of the preset authors' own tuning.
+H1 was ranked first of ten.
+
+**H8 is the only win, and it is a cost win.** Identical rate and identical
+distortion — `rmse` 0.8687 and band-limited `rmse` 0.5013 agree to four
+decimals with stock, and the file is 596 bytes *smaller* — for 61 % of the
+encode time. This is consistent with the finding already recorded above:
+distortion sits at the uniform-quantiser bound, so the encoder's RD search
+is choosing between candidates that are all equivalent, and can be cut
+without losing anything. H8 was ranked eighth of ten.
+
+**H2 was not tested.** `r0-zerolsb` matches stock to four decimals because
+`cgps_allow_zero_lsb_flag` has nothing to act on in SpikeGLX data, whose LSB
+is 1. The arm needs an AIND recording (LSB 12) to mean anything — a
+candidate/substrate pairing error in this rung, not a result.
+
+**What this changes.** The programme was framed around finding CR headroom.
+Rung 0 says that on this substrate there is none to find in the cfg
+parameters, while a 39 % cost reduction was sitting in the hypothesis ranked
+second-to-last. Since T.261's measured deployment blocker is cost (52x
+realtime encode, and a 6-10x sorting penalty), H8 is worth more than the CR
+gain the plan was hunting. Carry H8 into rung 1 as the new baseline, retire
+H1 and H4, and re-run H2 against AIND before ranking it.
+
+Determinism caveat: CR here is exactly reproducible (same encoder, same
+input), so these differences carry no measurement noise. What they do not
+carry is generalisation — one recording, one QP, one window. Rung 1's job is
+to say whether H8's free speedup and H3's 0.2 % survive four QP points and a
+second substrate.
 
 ## Staged search
 
