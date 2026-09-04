@@ -242,6 +242,111 @@ carry is generalisation — one recording, one QP, one window. Rung 1's job is
 to say whether H8's free speedup and H3's 0.2 % survive four QP points and a
 second substrate.
 
+## Rung 0 follow-up — H8 across QP, and the LSB audit
+
+Rung 0 left two loose ends: its one positive finding rested on a single QP
+point, and its zero-LSB arm had been run on IBL, where the flag cannot act.
+Both are now closed, and closing the second turned into an audit of every
+recording family in the study.
+
+### H8 generalises
+
+|  QP | stock CR |   H8 CR |     dCR | stock s | H8 s |  cost |
+| --: | -------: | ------: | ------: | ------: | ---: | ----: |
+| 1.0 |   3.7115 |  3.7115 | -0.00 % |     259 |  153 | 0.59x |
+| 3.0 |   6.2093 |  6.2094 | +0.00 % |     405 |  250 | 0.62x |
+| 5.0 |   9.0188 |  9.0189 | +0.00 % |     400 |  243 | 0.61x |
+| 8.0 |  16.7720 | 16.7728 | +0.00 % |     368 |  222 | 0.60x |
+
+Identical CR to four decimals across a 4.5x CR range, at 0.59-0.62x cost
+throughout -- including QP 1.0, where fine quantisation might have given the
+RD search something to protect. It does not. AIND agrees (448 s -> 280 s), so
+this is not IBL-specific. **A ~39 % encode-time reduction for nothing.**
+Since T.261's measured blocker is cost, not ratio, this is worth more than
+the CR headroom the programme was built to hunt. H8 was ranked eighth of ten.
+
+### `cgps_allow_zero_lsb_flag` is inert, not partially effective
+
+On AIND 634568 -- which does carry a real 12-lattice -- flag on and flag off
+give identical CR, identical encode time and identical RMSE. The plan
+previously estimated the flag "can capture at most 2 of those 3.43 bits";
+the measured figure is zero. External correction is the only route to H2.
+
+### The lattice spectrum
+
+Exact-fraction / chance ratio, after per-channel median removal. A genuine
+lattice at L shows a peak at L *and* at every divisor of L -- that divisor
+signature is what distinguishes a lattice from a coincidence:
+
+|  L | AIND NP1 | AIND NP2 (x2) | IBL NP1 | MEArec NP1 | MEArec NP2 |
+| -: | -------: | ------------: | ------: | ---------: | ---------: |
+|  2 |    1.72x |         1.00x |   1.02x |      2.00x |      1.00x |
+|  3 |    2.58x |         1.00x |   1.01x |      3.00x |      2.99x |
+|  4 |    3.44x |         1.01x |   1.03x |      4.00x |      1.00x |
+|  6 |    5.17x |         1.01x |   1.05x |      6.00x |      2.99x |
+|  8 |    3.52x |         1.02x |   1.09x |         -- |         -- |
+| 12 |   10.33x |         1.05x |   1.22x |     12.00x |      2.99x |
+| 16 |    3.58x |         1.04x |   1.41x |         -- |         -- |
+
+AIND NP1 is unambiguous: divisors of 12 (2, 3, 4, 6, 12) all sit at exact
+frac 0.8612 while non-divisors 8 and 16 collapse to 0.4395 and 0.2241.
+MEArec NP1 is a *perfect* 12-lattice and MEArec NP2 a 3-lattice, so both
+`configs/datasets/mearec-np*-100s.yaml` are correct and the sorting results
+are unaffected. IBL is correctly null -- it is the control that makes the
+rest of the table trustworthy.
+
+**AIND NP2 has no lattice at any L, on two independent sessions**, yet the
+paper assigns it LSB 3 and its own paired rows show +20 % CR from
+"correcting" it. Dividing by 3 there discards ~1.58 bits of real signal.
+`configs/profiles/t261-vs-paper-codecs.yaml` uses only AIND NP1 and IBL, so
+no cell in this study is affected -- but half the paper's NP2 lossless rows
+(1800 of 3600) rest on it.
+
+### What the paper's LSB gain is actually made of
+
+blosc-zstd level 5 bitshuffle, 1 s of each recording, gain decomposed into
+its two steps:
+
+| step                | NP2 CR |  x raw | NP1 CR |  x raw |
+| ------------------- | -----: | -----: | -----: | -----: |
+| raw                 | 1.4518 | 1.0000 | 1.9270 | 1.0000 |
+| median removal only | 1.6255 | 1.1196 | 1.9788 | 1.0269 |
+| divide by L only    | 1.7208 | 1.1853 | 2.4833 | 1.2887 |
+| paper recipe (both) | 1.8590 | 1.2805 | 2.5166 | 1.3060 |
+
+On NP1 the +28.9 % from dividing by 12 is legitimate -- the lattice is there.
+On NP2 the +18.5 % is not.
+
+### The correction is mildly lossy on real AIND data, and quantifiably so
+
+AIND NP1's lattice is dithered, not exact:
+
+    deviation from lattice     share
+    -------------------------  --------
+     0 ADU                     86.1169 %
+    -1 ADU                      6.9564 %
+    +1 ADU                      6.8835 %
+    |dev| <= 1                 99.9567 %
+
+RMSE of the discarded jitter is 0.3751 ADU = **0.3266 % of signal sigma**.
+The plan's "12-ADU lattice with +-1 jitter" was exactly right. So an AIND
+`-lsb` cell is lossless with respect to the *corrected* signal while
+carrying 0.33 % of sigma in preprocessing loss relative to what is stored --
+and `expected_lossless = not adapter.lossy` (`runner.py:200`) is codec-only,
+so those cells report `lossless = T`. That is faithful to the paper, which
+reports the same way, but it is worth an explicit note wherever AIND
+`-lsb` CRs sit beside genuinely lossless IBL ones.
+
+### One implementation trap
+
+The lattice has an **arbitrary per-channel phase**: median residues span all
+twelve values and only 8.85 % are multiples of 12. So plain median removal
+recovers the lattice (0.8612) while snapping the median to a multiple of 12
+destroys it (0.0887, i.e. chance) -- as does not removing it at all. Removing
+the per-channel modal residue instead gives the identical 0.8612, confirming
+the mechanism. The paper's median-first recipe is correct and must not be
+"improved" by rounding the offset to the lattice.
+
 ## Staged search
 
 `rmse = QP/sqrt(12)` holds to 0.91-1.06x across 30 lossy cells — **but only
