@@ -1,0 +1,68 @@
+# Do the Rung 0 profile survivors change SPIKE SORTING? — the criterion the
+# profile search was missing.
+#
+# Rung 0 ranked ten candidate cfgs on compression ratio and encode cost. CR
+# turned out to be flat: every surviving arm lands within 0.2 % of stock, so
+# the axis the search ranked on does not discriminate. Cost does (24x spread),
+# and that is what eliminated seven candidates — but cost is not a fidelity
+# criterion. Whether a profile is ACCEPTABLE is a sorting question, and no
+# rung so far has asked it.
+#
+# WHY THIS SKIPS RUNGS 1-2. The staged search put four QP points (rung 1) and
+# a second substrate (rung 2) before sorting, as cheap filters to avoid
+# spending rung-3 budget on bad candidates. Both jobs are already done:
+# Rung 0 eliminated seven arms on cost, and the follow-up measured the
+# survivors at QP 1.0/3.0/5.0/8.0 and on a second substrate (AIND), where H8
+# held at 0.59-0.62x cost with CR identical to four decimals. There is
+# nothing left for rungs 1-2 to filter, and they are sorter-free by design,
+# so they cannot answer the question that remains.
+#
+# ARMS:
+#   * blosc-zstd lossless — NULL CONTROL. A lossless codec must change
+#     nothing. If it moves any endpoint, the pipeline is measuring its own
+#     noise and every lossy number below is void.
+#   * r0-stock at QP 3.0 / 5.0 — the reference the others are judged against.
+#   * r0-h8-fast — Rung 0's one win (39 % less encode time at identical rate
+#     and distortion). "Identical" there meant CR and RMSE agreeing to four
+#     decimals, NOT a bit-identical decode: the bitstream is 596 bytes
+#     smaller, so the reconstruction differs. Equal RMSE does not mean equal
+#     error DISTRIBUTION, and spike detection cares where the error lands.
+#     This arm is what turns "free" from an inference into a measurement.
+#   * r0-h3-intra — the only arm with a CR edge (+0.2 %), at 1.05x cost.
+#   * bittrunc bits=6 — POSITIVE CONTROL. Must fail the 10 % waveform line.
+#     An arm that never fails proves nothing.
+#
+# QP 3.0 and 5.0 span T.261's usable range: it passes the Fig 14 waveform
+# line through QP 5.0 and fails at 8.0, and QP 5.0 is where the headline
+# comparison sits (CR 8.58 / +19 FP, against WavPack 2.25 bps at CR 7.10 /
+# +5 FP).
+#
+# 600 s, not 100 s: short slices are BIASED, not merely noisy — 6 of 10 arms
+# reversed the sign of an endpoint between 100 s and 600 s, and a biased
+# proxy cannot be averaged away.
+#
+# REQUIRES `BWC_CFG_DIR=configs/bwc-cfg` in the environment, otherwise the
+# r0-* presets do not resolve and every T.261 arm fails at construction.
+
+name: sorting-eval-t261-profiles
+datasets:
+  - configs/datasets/mearec-np1-full.yaml
+
+codecs:
+  # --- null control ---------------------------------------------------
+  - {codec: blosc-zstd, params: {level: 9, shuffle: byte}}
+
+  # --- reference profile ----------------------------------------------
+  - {codec: t261, params: {preset: r0-stock, step_size_for_qp: 3.0}}
+  - {codec: t261, params: {preset: r0-stock, step_size_for_qp: 5.0}}
+
+  # --- H8: is the 39 % speedup free on the criterion that matters? -----
+  - {codec: t261, params: {preset: r0-h8-fast, step_size_for_qp: 3.0}}
+  - {codec: t261, params: {preset: r0-h8-fast, step_size_for_qp: 5.0}}
+
+  # --- H3: the only arm with a CR edge ---------------------------------
+  - {codec: t261, params: {preset: r0-h3-intra, step_size_for_qp: 3.0}}
+  - {codec: t261, params: {preset: r0-h3-intra, step_size_for_qp: 5.0}}
+
+  # --- positive control: must fail the 10 % line -----------------------
+  - {codec: bittrunc, params: {bits: 6}}

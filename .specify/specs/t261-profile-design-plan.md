@@ -80,7 +80,7 @@ increase in encoder time.
 |  H5 | band-split <300 / 300-6000 Hz at independent QP     | up to 2-3x usable CR           | adapter work         | not run at rung 0         |
 |  H6 | `ChannelDistortionScaleFactor` 0.5, 1.0             | FP reduction at matched CR     | needs seekable input | not run at rung 0         |
 |  H7 | decorrelate error at fixed RMSE                     | FP headroom                    | encoder time         | not run at rung 0         |
-|  H8 | cut encoder search effort                           | large speedup, small rate loss | free                 | **+0.0 %, 0.61x**         |
+|  H8 | cut encoder search effort                           | large speedup, small rate loss | free                 | **0.61x**, sorting TBD    |
 |  H9 | LFP profile: joint channels, long blocks, low order | substantial                    | may be infeasible    | not run at rung 0         |
 | H10 | try the ACoM and EMG presets as-is                  | free reference points          | free                 | not run at rung 0         |
 
@@ -261,7 +261,35 @@ recording family in the study.
 Identical CR to four decimals across a 4.5x CR range, at 0.59-0.62x cost
 throughout -- including QP 1.0, where fine quantisation might have given the
 RD search something to protect. It does not. AIND agrees (448 s -> 280 s), so
-this is not IBL-specific. **A ~39 % encode-time reduction for nothing.**
+this is not IBL-specific. **A ~39 % encode-time reduction at statistically
+indistinguishable fidelity.**
+
+That wording is deliberate, and replaces an earlier "for nothing" that the
+evidence did not support. The H8 bitstream is 596 bytes *smaller* than
+stock's, so the decode is **not** bit-identical: 3.06 % of samples differ,
+and those differences are 7.4x enriched on the high-amplitude samples that
+carry spikes (22.76 % of |x| > 5 sigma differ, against 3.06 % overall;
+124 of 384 channels touched). Equal aggregate RMSE does not imply equal
+error *distribution*, and spike detection responds to the latter.
+
+Stratifying reconstruction error by amplitude shows the differences are
+symmetric rather than a degradation:
+
+    stratum         n samples     stock   h8-fast   h8/stock
+    -------------  ----------  --------  --------  ---------
+    all           115200000     0.86866   0.86873    1.0001x
+    |x| > 1 sigma  34575366     0.86896   0.86903    1.0001x
+    |x| > 3 sigma   1347113     0.86642   0.86639    1.0000x
+    |x| > 5 sigma     75854     0.88036   0.87694    0.9961x
+    |x| > 8 sigma     11308     0.89084   0.89747    1.0074x
+
+Max |err| is 6.0 for both; H8 is worse on 1.4350 % of samples and better on
+1.4273 %. The two departures from 1.0000 sit at the smallest strata and flip
+sign, at ~1.5 and ~1.1 standard errors -- noise, not a trend. **No evidence
+of systematic fidelity loss, but this is amplitude as a proxy for spikes on
+a slice with no ground truth.** Sorter output is not a smooth function of
+reconstruction error, so H8 is not established as free until the 600 s
+MEArec sorting arms run.
 Since T.261's measured blocker is cost, not ratio, this is worth more than
 the CR headroom the programme was built to hunt. H8 was ranked eighth of ten.
 
