@@ -20,6 +20,7 @@ a working binary — otherwise the `t261` name simply isn't listed.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import struct
@@ -389,8 +390,28 @@ if _AVAILABLE:
                 "encoder_path": str(ENCODER) if ENCODER else None,
                 "decoder_path": str(DECODER) if DECODER else None,
                 "cfg_dir": str(CFG_DIR) if CFG_DIR else None,
+                "cfg_sha256": _cfg_sha256(self._preset),
             }
             return info
+
+
+def _cfg_sha256(preset: str) -> str | None:
+    """SHA-256 of the preset .cfg actually used, so candidate identity is
+    content rather than a filename.
+
+    `BWC_CFG_DIR` lets candidate cfgs live outside the BWC checkout, and it
+    is process-global: two sweeps can resolve the same `preset=` name to
+    different files, and an edited candidate keeps its name. Recording only
+    `preset` and `cfg_dir` cannot distinguish either case, which would make
+    a profile-search result unattributable to the config that produced it.
+    """
+    if CFG_DIR is None:
+        return None
+    path = CFG_DIR / f"{preset}.cfg"
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
 
 
 _BWC_SHA_CACHE: str | None = None
