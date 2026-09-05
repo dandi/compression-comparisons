@@ -375,6 +375,54 @@ the per-channel modal residue instead gives the identical 0.8612, confirming
 the mechanism. The paper's median-first recipe is correct and must not be
 "improved" by rounding the offset to the lattice.
 
+## The sorting reference, and which endpoints can be believed
+
+Measured from `derivatives/sorting-2026-08-26-sorting-eval-t261-600s`
+(600 s MEArec NP1, lsb 12, chunk 1.0 s, Kilosort 4, 100 GT units). Any
+profile judged on sorting is judged against these.
+
+| arm                                    |       CR | well |  FP | redun |    acc |
+| -------------------------------------- | -------: | ---: | --: | ----: | -----: |
+| bittrunc bits=0 (lossless)             |    3.347 |   96 | 126 |    23 | 0.9809 |
+| blosc-zstd level 9 byte (lossless)     |    2.933 |   96 | 126 |    23 | 0.9809 |
+| t261 lossless preset                   |    3.721 |   96 | 126 |    23 | 0.9809 |
+| t261 QP 1.5                            |    4.270 |   94 | 129 |    26 | 0.9581 |
+| t261 QP 2.0                            |    4.829 |   98 | 133 |    26 | 0.9863 |
+| t261 QP 3.0                            |    5.989 |   98 | 138 |    22 | 0.9862 |
+| t261 QP 5.0                            |    8.575 |   96 | 145 |    30 | 0.9734 |
+| t261 QP 8.0                            |   14.514 |   99 | 184 |    23 | 0.9891 |
+| wavpack 2.25 bps                       |    7.101 |   97 | 131 |    24 | 0.9818 |
+| wavpack 2.5 bps                        |    6.746 |   95 | 135 |    24 | 0.9740 |
+| wavpack 3.0 bps                        |    5.759 |   94 | 128 |    22 | 0.9670 |
+| wavpack 4.0 bps                        |    4.450 |   97 | 143 |    23 | 0.9859 |
+| wavpack 6.0 bps                        |    3.734 |   96 | 126 |    23 | 0.9809 |
+| bittrunc bits=4                        |   29.098 |  100 | 353 |    37 | 0.9946 |
+| bittrunc bits=5                        |  337.411 |   77 | 923 |   303 | 0.8467 |
+| bittrunc bits=6                        | 1939.651 |   20 | 644 |   194 | 0.3856 |
+| bittrunc bits=7                        | 4884.255 |    4 | 588 |    44 | 0.1215 |
+
+**The null control passes.** Three unrelated lossless codecs land on
+identical endpoints (96 / 126 / 23 / 0.9809), so the pipeline is not
+measuring its own noise and a difference between arms is attributable to the
+codec. The positive control passes too: bit truncation collapses from 96
+well-detected to 4.
+
+**FP is the endpoint to read; `well_detected` is not.** Across the T.261 QP
+sweep FP is monotone in distortion -- 129, 133, 138, 145, 184 -- while
+`well_detected` scatters non-monotonically -- 94, 98, 98, 96, 99 -- and is
+*higher* at QP 8.0 than at QP 5.0 despite 2.4x the rate reduction. WavPack
+scatters the same way (97, 95, 94, 97, 96). So **+-2 well-detected units is
+noise**, and a profile claim resting on it is not a claim. The same caution
+applies to `accuracy`, which tracks `well_detected`.
+
+**A caution about bittrunc bits=4**: 100/100 well-detected, better than
+lossless, with FP nearly tripled (353). Aggressive distortion can *raise*
+the well-detected count while wrecking precision, which is why the paper's
+own criterion is a waveform-feature distribution and not a unit count.
+
+Reproduces the study's headline trade exactly: T.261 QP 5.0 is +19 FP over
+lossless at CR 8.575; WavPack 2.25 bps is +5 FP at CR 7.101.
+
 ## Staged search
 
 `rmse = QP/sqrt(12)` holds to 0.91-1.06x across 30 lossy cells — **but only
