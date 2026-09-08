@@ -554,6 +554,86 @@ sorting-oriented profile that deliberately degrades the LFP band, which the
 study treats as a separate use case. It could never have been reported as a
 strict improvement.
 
+## A T.261 defect in every result so far: the ragged final block
+
+Found by the third profile review, verified independently here, and
+mechanistically explained. **This is not a profile candidate -- it is a
+defect in how the study drives the codec, and it is present in every T.261
+number produced to date.**
+
+Every T.261 cell encodes 1 s chunks at `LOG2_MAX_BLOCK_SIZE: 10`. Both our
+sample rates leave a remainder: 30000 % 1024 = 304 and 32000 % 1024 = 256.
+BWC extends that remainder by **replicating the last sample**, which appends
+a DC step, so the final block is half signal and half constant -- and the DCT
+dumps the resulting error onto the real samples.
+
+Measured, 1 s MEArec NP1 at QP 5.0 (tail = the ragged block, body = the rest):
+
+| extension             | max\|e\| | n>2QP | tail rmse | body rmse |
+| --------------------- | -------: | ----: | --------: | --------: |
+| unpadded (as shipped) |       18 |   488 |    3.4956 |    1.4202 |
+| replicate             |       18 |   488 |    3.4956 |    1.4202 |
+| **mirror**            |    **8** | **0** |**1.4114** |    1.4202 |
+| zero                  |       18 |   536 |    3.5166 |    1.4202 |
+| trimmed to 31744      |        8 |     0 |        -- |    1.4202 |
+
+Externally replicating is **bit-identical** to not padding, which is how we
+know BWC does it internally. Zeros are worse (bigger step). Mirroring has no
+discontinuity and the tail then matches the body exactly.
+
+Scale of the defect as shipped: **2.46x the body's rmse, peaks at 3.6x QP,
+on 209 of 384 channels (54 %)**, in the last 0.80 % of every chunk. At 1 s
+chunks that is ~600 bursts per 600 s recording. It appears at QP >= 5 as
+outliers, and the tail rmse is elevated even at QP 3.0 (0.9324 vs 0.8646
+mirrored).
+
+**Why this matters beyond tidiness.** A periodic burst of 3.6x QP errors on
+half the channels is a plausible false-positive generator that aggregate
+in-band rmse cannot see, and it is a candidate answer to the study's
+standing puzzle: T.261 carries ~2x *lower* in-band error than WavPack yet
+produces +19 FP against WavPack's +5. It is also **asymmetric** -- the defect
+is T.261-specific, so the WavPack and blosc arms of the headline comparison
+are unaffected. That comparison may be measuring a fixable defect rather
+than the codec's intrinsic behaviour. **This is a hypothesis with a clean
+A/B, not a demonstrated cause.**
+
+### Two fixes, and the second is strictly better
+
+`T261Codec(pad_to_block=N)` mirror-pads to a multiple of N, records the true
+length in a `T2P1` header and trims on decode. Streams without the magic
+decode exactly as before, so existing results stay byte-comparable. Cost:
+
+| QP  | stock CR | mirror CR |    dCR | tail rmse stock -> mirror |
+| --: | -------: | --------: | -----: | ------------------------: |
+| 3.0 |   5.9919 |    5.8981 | -1.57% |         0.9324 -> 0.8646  |
+| 5.0 |   8.5767 |    8.3729 | -2.38% |         3.4956 -> 1.4114  |
+| 8.0 |  14.5165 |   14.1193 | -2.74% |         4.2917 -> 2.3511  |
+
+-2.4 % is exactly the cost of the 768 extra samples (768/32000 = 2.4 %), so
+padding buys the fix with rate.
+
+**Better: align the chunk instead.** At `--chunk-duration-s 1.024` there is
+no remainder for either sample rate -- 30000 x 1.024 = 30720 = 30 x 1024 and
+32000 x 1.024 = 32768 = 32 x 1024, both exact. No padding, no rate cost, no
+ragged block. 10.24 s works the same way (307200 and 327680). The only price
+is a 2.4 % deviation from the paper's nominal 1 s chunk.
+
+### What this does to R3's best candidate
+
+`p-blk7`'s clean error tail is the same effect reached by accident: 32000 is
+divisible by 128, so block 7 leaves no remainder at all. Its measured
++1.6 % CR stands, but "short blocks suit spikes" is not what fixed its tail.
+
+### The decisive next experiment
+
+A 600 s MEArec sorting A/B on this single change -- same codec, same QP, one
+parameter different -- before any of the seven profile candidates. It is
+cheaper than all of them and it bears on results already in the report
+rather than on hypothetical future ones. If FP at QP 5.0 drops from 145
+toward the 126-133 lossless band, the defect was inflating the study's
+headline; if FP does not move, the tail artifact is not what drives FP,
+which is equally worth knowing and retires the hypothesis.
+
 ## Staged search
 
 `rmse = QP/sqrt(12)` holds to 0.91-1.06x across 30 lossy cells — **but only

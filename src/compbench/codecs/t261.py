@@ -74,6 +74,15 @@ def _resolve_binary(name: str) -> Path | None:
     return None
 
 
+# Padding header: a chunk whose length is not a multiple of the max block
+# size leaves a remainder block that MAX_SPLIT_DEPTH 0 forbids splitting, and
+# that block is coded pathologically -- measured 2.46x the body's rmse with
+# peaks at 3.6x QP on 54 % of channels. Padding up removes it; the true
+# length must then travel with the stream so decode can trim.
+_PAD_MAGIC = b"T2P1"
+_PAD_HEADER = struct.Struct("<4sI")
+
+
 def _resolve_cfg_dir() -> Path | None:
     env_dir = os.environ.get("BWC_CFG_DIR")
     if env_dir:
@@ -186,6 +195,7 @@ class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
         max_abs_delta_qp: int | None = None,
         extra_args: tuple[str, ...] = (),
         progress_dir: str | Path | None = None,
+        pad_to_block: int = 0,
     ) -> None:
         if not _AVAILABLE:
             raise RuntimeError(
@@ -203,6 +213,7 @@ class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
                 f"(header hard-codes 16-bit samples). The pybind11 wrapper in Phase 2b "
                 f"will honour 16-24 bpp per the T.261 spec."
             )
+        self.pad_to_block = int(pad_to_block)
         self.preset = preset
         self.bit_depth = int(bit_depth)
         self.step_size_for_qp = float(step_size_for_qp) if step_size_for_qp is not None else None
@@ -229,6 +240,7 @@ class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
             "step_size_for_qp": self.step_size_for_qp,
             "max_abs_delta_qp": self.max_abs_delta_qp,
             "extra_args": list(self.extra_args),
+            "pad_to_block": self.pad_to_block,
         }
 
     def _run_bwc(
@@ -281,6 +293,35 @@ class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
 
     def encode(self, buf: Any) -> bytes:
         data = np.asarray(buf)
+        n_true = data.shape[0]
+        pad = 0
+        if self.pad_to_block > 1:
+            rem = n_true % self.pad_to_block
+            if rem:
+                pad = self.pad_to_block - rem
+                # MIRROR extension. This choice is the whole point, measured
+                # on 1 s of MEArec NP1 at QP 5.0 (tail = the ragged final
+                # block, body = everything before it):
+                #
+                #   extension      max|e|  n>2QP  tail rmse  body rmse
+                #   unpadded           18    488     3.4956     1.4202
+                #   replicate          18    488     3.4956     1.4202
+                #   mirror              8      0     1.4186     1.4202
+                #   zero               18    536     3.5166     1.4202
+                #
+                # Replicating is bit-identical to not padding at all, which
+                # is how we know BWC already extends by repeating the last
+                # sample. That appends a DC step, so the final block is half
+                # signal and half constant -- which the DCT codes badly, and
+                # it dumps the error onto the real samples: 2.46x the body's
+                # rmse with peaks at 3.6x QP on 54 % of channels. Zeros are
+                # worse (bigger step). Mirroring has no discontinuity, and
+                # the tail then matches the body exactly.
+                # `symmetric` rather than a hand-rolled reverse slice: it is
+                # correct for pad >= n_true (a short final chunk), where a
+                # slice would silently produce too few samples and leave the
+                # length not a multiple of the block -- defeating the point.
+                data = np.pad(data, ((0, pad), (0, 0)), mode="symmetric")
         scratch, td = self._make_scratch("enc")
         try:
             in_path = scratch / "input.raw"
@@ -299,13 +340,23 @@ class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
                 *self._build_overrides(),
             ]
             self._run_bwc(cmd, scratch, phase="encode")
-            return bs_path.read_bytes()
+            bitstream = bs_path.read_bytes()
+            if pad:
+                # The decoder returns whatever length it was given, so the
+                # true sample count has to travel with the stream. Streams
+                # without the magic decode exactly as before.
+                return _PAD_HEADER.pack(_PAD_MAGIC, n_true) + bitstream
+            return bitstream
         finally:
             if td is not None:
                 td.cleanup()
 
     def decode(self, buf: Any, out: np.ndarray | None = None) -> np.ndarray:
         data_bytes = bytes(buf)
+        n_true: int | None = None
+        if data_bytes[: len(_PAD_MAGIC)] == _PAD_MAGIC:
+            _, n_true = _PAD_HEADER.unpack_from(data_bytes, 0)
+            data_bytes = data_bytes[_PAD_HEADER.size :]
         scratch, td = self._make_scratch("dec")
         try:
             bs_path = scratch / "input.bwc"
@@ -322,6 +373,8 @@ class T261Codec(Codec):  # type: ignore[misc]  # numcodecs.abc.Codec is untyped
         finally:
             if td is not None:
                 td.cleanup()
+        if n_true is not None:
+            arr = arr[:n_true]
         if out is not None:
             out[...] = arr
             return out
