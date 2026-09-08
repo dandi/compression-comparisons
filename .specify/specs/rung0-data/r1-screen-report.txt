@@ -1,0 +1,21 @@
+reference (320000, 384), sigma=5.078, per-channel sigma min=4.37 max=8.61 spread=2.0x
+
+candidate             CR   cost     rmse err/sig med      IQR  max/min rmse>3sig rmse>5sig
+------------------------------------------------------------------------------------------
+r1-h7-quant2       8.603  1.35x   1.4417     0.29497  0.03072     1.98    1.6633    1.6152
+r1-h7-percept      8.577  1.04x   1.4507     0.29737  0.03079     1.98    1.6764    1.6382
+r0-stock           8.577  1.00x   1.4506     0.29736  0.03078     1.98    1.6764    1.6382
+r1-h7-trellis      8.577  1.07x   1.4506     0.29736  0.03078     1.98    1.6764    1.6382
+r1-h7-quant0       8.542  0.84x   1.5765     0.32280  0.03516     1.99    1.7833    1.7250
+r1-h6-ctrl         7.862  1.08x   1.3061     0.26663  0.02448     1.88    1.5816    1.5711
+r1-h6-cds05        7.600  1.09x   1.2474     0.25453  0.02425     1.88    1.4950    1.4923
+r1-h6-cds10        7.418  1.13x   1.2035     0.24555  0.02359     1.88    1.4217    1.4226
+
+vs stock (ratios; <1 means the candidate COMPRESSES the spread):
+  r1-h6-cds10      CR 0.8649x  err/sig-IQR 0.7662x  max/min 0.9497x  rmse>5sig 0.8684x
+  r1-h6-cds05      CR 0.8861x  err/sig-IQR 0.7879x  max/min 0.9506x  rmse>5sig 0.9109x
+  r1-h6-ctrl       CR 0.9167x  err/sig-IQR 0.7952x  max/min 0.9498x  rmse>5sig 0.9590x
+  r1-h7-quant2     CR 1.0031x  err/sig-IQR 0.9981x  max/min 0.9990x  rmse>5sig 0.9860x
+  r1-h7-trellis    CR 1.0000x  err/sig-IQR 1.0000x  max/min 1.0000x  rmse>5sig 1.0000x
+  r1-h7-percept    CR 1.0000x  err/sig-IQR 1.0001x  max/min 1.0000x  rmse>5sig 1.0000x
+  r1-h7-quant0     CR 0.9960x  err/sig-IQR 1.1423x  max/min 1.0062x  rmse>5sig 1.0530x

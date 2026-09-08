@@ -38,7 +38,7 @@ export COMPBENCH_BLOSC_THREADS=1
 mkdir -p "$OUT"
 
 echo "waiting for the sorting run's compression stage..."
-until grep -q 'compression stage complete' "$TOOL/results/rung0-sorting.log" 2>/dev/null; do sleep 120; done
+: # the sorting run's compression stage is already complete
 echo "=== r1 screen starting $(date -Is) ==="
 
 for cand in r0-stock r1-h6-ctrl r1-h6-cds05 r1-h6-cds10 \
@@ -47,10 +47,13 @@ for cand in r0-stock r1-h6-ctrl r1-h6-cds05 r1-h6-cds10 \
     cell="$OUT/$cand"
     if [ ! -f "$cell/compressed.zarr/.zgroup" ]; then
       mkdir -p "$cell"
-      /usr/bin/time -f %e -o "$cell/wall.txt" \
-        compbench compress --mearec "$MEAREC" --lsb $LSB --duration-s $DUR \
+      # /usr/bin/time is not installed in this container -- it silently killed
+      # all eight arms on the first attempt. Use the shell clock instead.
+      t0=$SECONDS
+      compbench compress --mearec "$MEAREC" --lsb $LSB --duration-s $DUR \
           --codec t261 --codec-params "preset=$cand,step_size_for_qp=$QP" \
           --chunk-duration-s 1.0 --output-dir "$cell" > "$cell/log" 2>&1 \
+        && echo $((SECONDS - t0)) > "$cell/wall.txt" \
         || echo "FAILED $cand: $(tail -2 "$cell/log" | tr '\n' ' ')"
     fi
   ) &
