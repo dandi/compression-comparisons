@@ -59,5 +59,6 @@ from compbench.codecs import bittrunc  # noqa: E402,F401
 
 # T.261 / H.BWC via subprocess — only registers if BWC binaries are findable.
 from compbench.codecs import t261 as _t261  # noqa: F401,E402
+from compbench.codecs import t261_bandsplit as _t261_bandsplit  # noqa: F401,E402
 
 __all__ = ["CodecAdapter", "all_adapters", "get", "names", "register"]
