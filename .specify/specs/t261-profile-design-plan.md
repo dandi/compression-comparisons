@@ -242,6 +242,89 @@ carry is generalisation — one recording, one QP, one window. Rung 1's job is
 to say whether H8's free speedup and H3's 0.2 % survive four QP points and a
 second substrate.
 
+## CORRECTION: H6 was never applied, and four arms tested dead code
+
+Verified in the BWC source after three independent reviews. This supersedes
+the H6 conclusion recorded below, which was wrong.
+
+**`ChannelDistortionScaleFactor` is mis-indexed and cannot act per channel.**
+`LambdaManager::analyzeOriginal` is called once with `InputNumChannels`
+(384, global) and fills `m_channelLambdaScale[0..383]` with per-channel
+variance ratios (`App/Encoder/Encoder.cpp:1275`, `StepSizeManager.h:54-91`).
+But `getLambdaForChannel()` is called with the **group-local** channel index
+(`BlockEncoder.cpp:2087`, inside `for (channel = 0; channel <
+getNumChannels(); channel++)` where `getNumChannels()` is the *group's*
+count), and `ChannelGroupSize: 1` builds 384 groups of one channel
+(`Encoder.cpp:726-739`). **The local index is therefore always 0, and every
+one of the 384 channels received channel 0's variance ratio.**
+
+So the factor acted as a *uniform global* lambda scale, blended with the
+fixed value at `StepSizeManager.h:90`, monotone in the factor. That predicts
+exactly what was measured -- CR down, rmse down in proportion, normalised
+spread unchanged, monotone in the setting -- and it means:
+
+* **H6's per-channel hypothesis is UNTESTED, not refuted.** What was tested
+  was a global lambda change.
+* The earlier inference that "the knob works against its own hypothesis"
+  attributed a rate-distortion shift to a failed redistribution mechanism.
+  The measured numbers are equally consistent with the knob doing nothing
+  per-channel at all, and only a correctly-indexed run separates the two.
+* `r1-h6-ctrl` remains valid and still isolates the `MaxAbsDeltaQP` effect.
+
+Testing H6 properly needs `ChannelGroupSize: 0` -- the only setting where
+local and global indices coincide -- which is the arm that timed out twice;
+or a ~2-line change passing each group's first global channel index into
+`ChannelGroupEncoder` (which already receives `cgId`). This is arguably an
+upstream BWC bug.
+
+**Four of eight rung-0/1 arms varied structurally dead parameters**, which is
+a systematic defect in how candidates were built rather than four
+independent negatives. No one traced a knob to its consumer before spending
+a cell on it:
+
+* `cgps_allow_transform_skip: 0` makes the residual-mode list *exactly*
+  `{TM_DCT}` (`PredictionEnc.h:1150-1192`). That kills
+  `UseTrafoSignalAdapt`, `UseTrafoDiffs`, `UseTrafoSlope`,
+  `UseTrafoHalfSlope`, `NumOptionsSignalAdapt`, `UsePreLPC`,
+  `cgps_allow_verbatim_coding`, `cgps_allow_sample_pred_fixed_weights_flag`
+  -- and `TrellisQuantDelay`, whose only consumer is inside
+  `forwardSampleWiseTransformQuant` (`Transform.cpp:2117`), reached only by
+  `TM_OFF` blocks. `r1-h7-trellis` did not test trellis quantisation; the
+  code never ran.
+* `PerceptMode` cannot fire on broadband data by design: the deblocking
+  filter has an explicit low-passness veto (`Transform.cpp:2422-2477`) that
+  bails when the first difference is comparable to the signal, which is what
+  30 kHz wideband extracellular data is. The interesting branch also needs
+  mode > 2 *and* `UseTrafoSignalAdapt: 1`; `r1-h7-percept` used mode 1.
+* `ChannelGroupSize: 1` makes every cross-channel gate
+  `(channel & chIndepMask) > 0` false, killing `UseLinearModel`,
+  `UseBMOffsetPredPrevCh`, `UsePrevChSignalAdapt`, `UseLMSigFiltering`,
+  `UseLMSigMultiHyp`, `cgps_allow_cc_lms_flag`,
+  `cgps_max_order_cc_lms_minus_one`, `MaxNumMinus1PrevChSigAd` and
+  `LMNumCandsFullRD`. **H8 is therefore a one-parameter change**:
+  `NumOptionsSignalAdapt` was already 0 in stock and `LMNumCandsFullRD 3->1`
+  gates a dead path, so all of its measured 0.61x is
+  `BMNumCandsFullRD 2->1`. That matters for attributing its 15-FP swing.
+* `r0-zerolsb` ran on IBL where the LSB is 1 (already recorded).
+
+**A mechanism for the H1/H4 refutation.** `cgps_GetLmsOrder`
+(`StreamPacketTypes.h:222-227`) scales the LMS AR order by the block's size
+relative to the maximum: at `LMS_ORDER 16` and `LOG2_MAX_BLOCK_SIZE 10`, a
+1024-sample block gets order 16 and a 256-sample block gets order 4.
+Splitting buys per-block adaptivity by discarding 12 of the 16 predictor
+taps that carry most of the gain. Block size and predictor order are not
+separable knobs in this codec, which is a better explanation than "the pins
+are the authors' tuning" and means any future partitioning hypothesis is
+dead unless it raises `LMS_ORDER` proportionally.
+
+Also corrected: `combinedPresetEMG_IndepChannel.cfg` is **byte-identical**
+to `combinedPresetEEG_IndepChannel.cfg`, so H10's EMG arm is a guaranteed
+no-op; but `combinedPresetECG_IndepChannel` *is* lossy and differs from
+stock in only four parameters, so H10 has a lossy reference point after all.
+`UseTrafoSkip` is in the cfg allow-list but read nowhere -- a dead key.
+`ChIndepIntMask` is hard-wired to 511 and absent from the allow-list, so it
+cannot be set at all.
+
 ## Rung 0 follow-up — H8 across QP, and the LSB audit
 
 Rung 0 left two loose ends: its one positive finding rested on a single QP
