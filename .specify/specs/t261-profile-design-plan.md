@@ -506,6 +506,54 @@ own criterion is a waveform-feature distribution and not a unit count.
 Reproduces the study's headline trade exactly: T.261 QP 5.0 is +19 FP over
 lossless at CR 8.575; WavPack 2.25 bps is +5 FP at CR 7.101.
 
+## H5 as specified is refuted — quantisation error is not band-limited
+
+Implemented as `t261-bandsplit` (`src/compbench/codecs/t261_bandsplit.py`),
+split exact by construction (`lo_i + hi == x` bit-for-bit; lossless arm
+round-trips at rmse 0). 10 s of `ibl-CSHZAD026` raw, QP 5.0 on the spike
+band throughout, `qp_lo` swept:
+
+| arm                       |     CR |  total | spike 300-6k | LFP <300 |  >5sig |
+| ------------------------- | -----: | -----: | -----------: | -------: | -----: |
+| plain t261 qp=5 (ref)     | 9.0188 | 1.4516 |       0.8160 |   0.1786 | 1.5077 |
+| bandsplit qp_lo=5  hi=5   | 8.7863 | 1.5119 |       0.8790 |   0.2517 | 1.6182 |
+| bandsplit qp_lo=20 hi=5   | 9.0884 | 1.7955 |       0.9637 |   0.8379 | 2.1081 |
+| bandsplit qp_lo=40 hi=5   | 9.2205 | 2.3894 |       1.0443 |   1.6653 | 3.0574 |
+
+Coarsening the low band does buy rate: CR 8.7863 -> 9.2205, clearing the
+2.6 % two-encode handicap and reaching +2.2 % over plain T.261. **But
+spike-band error rises monotonically with it** -- 0.8160 -> 1.0443, +28 % --
+and >5 sigma error +103 %. Bandsplit is worse than plain T.261 on spike
+fidelity at *every* setting tested, including matched QP.
+
+**Why this is fundamental, not a tuning failure.** Quantisation error of a
+band-limited signal is not itself band-limited. Coarsely quantising the low
+band injects error across the whole spectrum, so a fraction always lands in
+300-6000 Hz however sharp the crossover; no cutoff or filter order fixes it.
+(The measured leak is smaller than white-noise theory predicts, because
+T.261's prediction shapes its error and a smooth low band predicts well --
+but it is real and monotone.)
+
+So **H5 as the plan specifies it -- "band-split <300 / 300-6000 Hz at
+independent QP" -- is refuted.** The premise that bits spent below 300 Hz
+are invisible to the sorter is true of the *signal* and false of the
+*quantisation error*.
+
+**The one variant with a valid mechanism is decimation.** Decimate the low
+band to ~1 kHz before coding it: its quantisation error is then confined
+below the new Nyquist by the interpolation filter, by construction rather
+than by hope, and the sample count drops ~30x so the two-encode handicap
+becomes ~1.03x instead of 2x. The cost is that exact reconstruction is lost
+(upsampling cannot reproduce the rounded low band), so the lossless null
+control this implementation currently passes would have to be replaced by a
+measured error floor. That is a different proposal and should be ranked
+against the reviewers' candidates rather than assumed to be next.
+
+Caveat that would have applied even had it worked: this is a
+sorting-oriented profile that deliberately degrades the LFP band, which the
+study treats as a separate use case. It could never have been reported as a
+strict improvement.
+
 ## Staged search
 
 `rmse = QP/sqrt(12)` holds to 0.91-1.06x across 30 lossy cells — **but only
