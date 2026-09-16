@@ -67,9 +67,18 @@ def test_snakemake_runs_smoke_profile(tmp_path: Path) -> None:
     report = results_dir / "report.parquet"
     assert report.exists(), f"report missing; dir: {list(results_dir.iterdir())}"
 
-    # Every cell dir should have metrics.json + duct-info.json.
-    cell_dirs = [d for d in results_dir.iterdir() if d.is_dir()]
-    assert len(cell_dirs) == 2, f"expected 2 cells; got {len(cell_dirs)}"
+    # Every cell dir should have metrics.json + duct-info.json. Dot-prefixed
+    # directories are the rule's own infrastructure -- `.cell-stderr` holds
+    # the per-cell wrapper stderr (Snakemake reports only an exit code, so a
+    # `datalad run` failure is otherwise undiagnosable) and `.cell-debris`
+    # holds a stale untracked cell directory moved aside so `datalad run
+    # --explicit --output` does not refuse it. Neither is a cell.
+    cell_dirs = [
+        d for d in results_dir.iterdir() if d.is_dir() and not d.name.startswith(".")
+    ]
+    assert len(cell_dirs) == 2, (
+        f"expected 2 cells; got {len(cell_dirs)}: {[d.name for d in cell_dirs]}"
+    )
     for cd in cell_dirs:
         metrics = json.loads((cd / "metrics.json").read_text())
         assert metrics["round_trip_ok"] is True

@@ -367,6 +367,11 @@ rule run_cell:
     params:
         cell_dir_q = lambda w: shlex.quote(_cell_dir(w.cell_id)),
         run_cmd = lambda w: _run_cmd(w.cell_id),
+        stderr_dir_q = shlex.quote(str(RESULTS_DIR / ".cell-stderr")),
+        debris_dir_q = shlex.quote(str(RESULTS_DIR / ".cell-debris")),
+        stderr_log_q = lambda w: shlex.quote(
+            str(RESULTS_DIR / ".cell-stderr" / f"{w.cell_id}.log")
+        ),
     threads: 1
     resources:
         mem_mb = 4096,
@@ -377,8 +382,43 @@ rule run_cell:
         export TMPDIR={TMPDIR:q}
         export COMPBENCH_BLOSC_THREADS="${{COMPBENCH_BLOSC_THREADS:-1}}"
         {WAVPACK_EXPORT}
+        # Clear a stale UNTRACKED cell directory before handing it to
+        # `datalad run --explicit --output`, which refuses one outright:
+        #
+        #   status(error): <cell_dir> [File unknown to git]
+        #
+        # A failed cell leaves exactly that state. Snakemake deletes the
+        # three declared outputs as possibly corrupt but the duct-* files
+        # survive, so the directory persists untracked -- and every re-run
+        # then fails on the previous run's debris rather than on whatever
+        # caused the original failure. That made 10 cells permanently
+        # unrecoverable across two sweep invocations, and the error was
+        # invisible because Snakemake logs only "non-zero exit code" while
+        # datalad's stderr went nowhere (see the stderr capture below).
+        #
+        # MOVED, not deleted, and only ever a directory git does not track
+        # that holds no metrics.json -- a tracked or completed cell is never
+        # touched, so this cannot destroy recorded work. The debris is worth
+        # keeping: a failed cell's duct-stdout still carries the line showing
+        # the compression itself succeeded, which is how the real cause was
+        # finally identified.
+        if [ -d {params.cell_dir_q} ] && [ ! -f {params.cell_dir_q}/metrics.json ]; then
+            if ! git ls-files --error-unmatch {params.cell_dir_q} >/dev/null 2>&1; then
+                mkdir -p {params.debris_dir_q}
+                mv -- {params.cell_dir_q} \
+                      {params.debris_dir_q}/"$(basename {params.cell_dir_q}).$$"
+            fi
+        fi
         mkdir -p {params.cell_dir_q}
-        {params.run_cmd}
+        # Capture the wrapper's own stderr to a per-cell file OUTSIDE the
+        # cell directory. Snakemake reports only the exit code, so a
+        # `datalad run` failure is otherwise undiagnosable -- which is why
+        # three incidents costing 20 cells were each misattributed to
+        # concurrency. It cannot live inside the cell directory: that is the
+        # declared --output, and an undeclared file there is itself a
+        # `datalad run --explicit` failure.
+        mkdir -p {params.stderr_dir_q}
+        {params.run_cmd} 2>{params.stderr_log_q}
         """
 
 
