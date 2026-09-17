@@ -634,6 +634,68 @@ toward the 126-133 lossless band, the defect was inflating the study's
 headline; if FP does not move, the tail artifact is not what drives FP,
 which is equally worth knowing and retires the hypothesis.
 
+## Chunk-alignment A/B: the defect does not drive false positives
+
+600 s MEArec NP1, lsb 12, QP 5.0, Kilosort 4. Two arms differing in ONE
+parameter: chunk 1.000 s (32000 samples, 256 left over a 1024 block, the
+ragged-block defect present) vs chunk 1.024 s (32768 = 32 x 1024 exactly, no
+remainder, no padding).
+
+| arm                      |     CR | well |  FP |  dFP | redun |    acc |
+| ------------------------ | -----: | ---: | --: | ---: | ----: | -----: |
+| lossless anchor          |     -- |   96 | 126 |   -- |    23 | 0.9809 |
+| chunk 1.000 (defect)     | 8.5753 |   96 | 145 |   +0 |    30 | 0.9734 |
+| chunk 1.024 (no defect)  | 8.5671 |   97 | 167 |  +22 |    22 | 0.9846 |
+
+**The control is exact.** Arm A reproduces the Aug-26 reference on all four
+endpoints (96/145/30/0.9734) and on CR to five significant figures, so the
+submodule re-pin, the venv reinstall and the whole compress-sort-compare
+chain are bit-deterministic. The two arms differ only in the parameter under
+test.
+
+**Alignment is effectively free on rate**: -0.096 % CR, and rmse is *better*
+(2.1244 vs 2.1489, -1.1 %). It is strictly preferable to the mirror-pad fix,
+which costs -2.38 % CR at this QP because it pays for 768 extra samples
+where alignment simply avoids the remainder.
+
+**But the hypothesis is refuted, and in the opposite direction.** Removing
+the defect raised FP from 145 to 167 rather than lowering it toward the
+lossless 126. So the ragged-block artifact is NOT what inflates T.261's
+false positives, and the suggestion that it might explain the headline
++19-vs-+5 comparison is withdrawn.
+
+The other endpoints moved the other way -- accuracy 0.9734 -> 0.9846,
+redundant 30 -> 22, well-detected 96 -> 97 -- which fits the defect having
+acted as a crude noise floor that suppressed detections: remove it, the
+signal is cleaner, and the sorter finds more units of both kinds.
+
+### The finding that matters more, now supported twice
+
+| change                | rmse      | dFP  |
+| --------------------- | --------- | ---: |
+| H8 (cut RD search)    | +0.027 %  |  +15 |
+| chunk alignment       | -1.1 %    |  +22 |
+
+Two independent experiments, opposite directions of distortion change, both
+producing FP swings of 15-22. **FP is not a monotone function of fidelity at
+single-run resolution.** That contradicts how this plan has been treating it
+-- "FP is the endpoint to read, monotone in distortion across the QP ladder"
+-- which holds across large QP steps and evidently not across small
+perturbations at fixed QP.
+
+Consequence for the study's central claim: T.261 at +19 FP against WavPack's
++5 is a 14 FP gap, which is *smaller* than swings now produced twice by
+changes that improved or barely touched fidelity. **That comparison cannot
+be carried by one run per arm.** It needs replication -- several windows or
+several seeds per arm -- before it can support a conclusion either way.
+
+### Status of the defect itself
+
+Still a real defect and still worth fixing: 2.46x the body's rmse, peaks at
+3.6x QP, on 54 % of channels, ~600 bursts per 600 s recording. Chunk
+alignment removes it for -0.096 % CR and improves rmse, accuracy and
+redundant-unit counts. It simply is not an FP driver.
+
 ## Staged search
 
 `rmse = QP/sqrt(12)` holds to 0.91-1.06x across 30 lossy cells — **but only
