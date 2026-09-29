@@ -185,7 +185,7 @@ codecs:
 
   # --- WavPack Hybrid: the paper's lossy baseline ------------------------
   # The curve T.261's QP sweep is measured against (paper Fig 10-14).
-  # NOTE: wavpack-numcodecs 0.2.3 changed the hybrid flag from `=` to `|=`,
+  # NOTE: wavpack-numcodecs 0.1.4 changed the hybrid flag from `=` to `|=`,
   # so at a given bps we emit a different bitstream than the paper's 0.1.3.
   # Recorded per-cell; see codecs/audio.py.
   - {codec: wavpack,     params: {level: 2, bps: 6.0}}

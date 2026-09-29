@@ -55,13 +55,28 @@ else:
               paper's for reasons that have nothing to do with the codec.
               Pinned to 1 for the same reason blosc is (see codecs/blosc.py).
             * The hybrid path changed from `config.flags = CONFIG_HYBRID_FLAG`
-              (which DISCARDS the level flags) to `config.flags |=
-              CONFIG_HYBRID_FLAG` (which KEEPS them). So at a given `bps`,
-              0.2.3 at `level=3` emits a different bitstream than 0.1.3 did:
-              ours runs in high mode, the paper's ran in default mode. This
-              is not correctable from here — it is recorded in the manifest
-              via `wavpack_numcodecs_version` so the lossy rows carry the
-              caveat with them.
+              to `config.flags |= CONFIG_HYBRID_FLAG` in upstream commit
+              a812cb67 ("Test multi-threading"), which shipped in **0.1.4**
+              — not 0.2.3, as this comment previously said. There is no
+              changelog entry; the fix rode along inside a threading commit.
+
+              What the plain `=` destroyed is mostly NOT the level flags.
+              Four statements earlier the same function sets
+              `config.flags = CONFIG_PAIR_UNDEF_CHANS`, and only levels 1, 3
+              and 4 `|=` a level bit — **level 2 sets no bit at all**. Our
+              profiles run `level: 2`, so for our cells the single flag
+              difference is `CONFIG_PAIR_UNDEF_CHANS` (0x20000000). Verified
+              empirically: at level 2 and level 3, 0.1.3 emits bit-identical
+              output, i.e. it silently discards `level` in hybrid mode. The
+              paper's own lossy driver passed `level=3`, which therefore
+              never took effect.
+
+              Measured consequence, 4 paired recordings x 7 bps: the two
+              versions are rate-distortion equivalent at matched CR (median
+              +1.2 %). But on ABSOLUTE CR against the paper's published
+              table, 0.1.3 reproduces to within 0.9 % at all 28 points while
+              0.2.3 deviates by up to 7.8 %. Recorded in the manifest via
+              `wavpack_numcodecs_version` so the lossy rows carry it.
             """
             from wavpack_numcodecs import WavPack
 
@@ -73,7 +88,7 @@ else:
             # The paper used 0.1.3, whose hybrid mode discards the level
             # flags; see make_codec.
             desc["hybrid_flag_semantics"] = (
-                "or-equals (>=0.2.0)" if self._bps is not None else "n/a"
+                "or-equals (>=0.1.4)" if self._bps is not None else "n/a"
             )
             return desc
 
