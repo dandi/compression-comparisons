@@ -5,20 +5,53 @@ newly-standardised **ITU-T T.261 / ISO/IEC 23003-8** ("H.BWC") codec against
 the codec set evaluated in Buccino et al. 2023
 ([J Neural Eng, 10.1088/1741-2552/acf5a4](https://doi.org/10.1088/1741-2552/acf5a4)).
 
-**Status (2026-08-20).** Phase 1 reproduction verified against the paper's
-own per-recording results: across 11 lossless codecs on CSHZAD026 at
-matched conditions, **median |Δ| 0.06 %, max 2.5 %**. All 16 benchmark
-recordings (523 GB) are local, and the full paper codec set — including
-WavPack, WavPack Hybrid and FLAC — runs natively.
+**Status (2026-09-30).** The Phase 1 reproduction is **complete**: 912 cells
+(11 lossless codecs x 8 NP1 recordings x 4 preprocessing conditions x
+parameter variants), 0 errors. Paired per recording against the paper's own
+per-session results, the deviation is **median 0.017 %, max 5.39 %** over 288
+gradeable cells (gate thresholds 2 % / 5 %); 287 of 288 are inside 5 %, and
+the single miss is a cell where we compress *better* than the paper. Codec
+**ranking reproduces 11/11**, including all best-shuffle choices, and the
+paper's Fig-6 headline CRs match to four digits.
 
-**Phase 3 is NOT complete.** `compbench.metrics.sorting` is a
-contract-only skeleton: no spike-sorting or spike-train metric is
-implemented yet, so every lossy claim currently rests on signal-level
-distortion (RMSE / PRDN), which the paper's own data shows does not
-predict sorting outcome. See
-[`.specify/specs/t261-benchmark-plan.md`](.specify/specs/t261-benchmark-plan.md)
-for the full design and
-[`DEPLOY.md`](DEPLOY.md) for running it.
+Spike-sorting evaluation is implemented and has been run: Kilosort 4 via
+SpikeInterface against MEArec ground truth, at 600 s, plus the paper's Fig-14
+waveform-feature criterion. `compbench.metrics.sorting` is no longer a
+skeleton — earlier versions of this file said so, and that is out of date.
+
+**T.261 versus the incumbent is a trade, not a win.** At their best operating
+points WavPack Hybrid 2.25 bps gives CR 7.10 with +5 excess false-positive
+units; T.261 QP 5.0 gives CR 8.58 with +19, both at lossless-parity unit
+recovery. T.261 compresses ~21 % harder; WavPack keeps the detector quieter.
+
+Three caveats that travel with every lossy claim here, all measured:
+
+* **False positives are not resolvable at one run per arm.** WavPack's FP
+  scatter across bps puts the error bar at ~17 units, and the headline
+  difference above is 14. Two rate-neutral or fidelity-*improving* changes
+  have since moved FP by +15 and +22 — so FP is monotone in distortion across
+  large QP steps and emphatically not across small perturbations.
+* **A T.261 defect is present in every result produced so far.** A 1 s chunk
+  is not a whole number of 1024-sample blocks, and BWC extends the remainder
+  by repeating the last sample; the resulting block codes at 2.46x the body's
+  RMSE, peaking at 3.6x QP, on 54 % of channels. `--chunk-duration-s 1.024`
+  removes it at -0.096 % CR (30000 x 1.024 = 30 x 1024 and 32000 x 1.024 =
+  32 x 1024, both exact). Fixing it does **not** reduce false positives -- it
+  raised them -- so it is a fidelity fix, not an FP fix.
+* **The Fig-14 verdict at 600 s is unresolved.** T.261 QP 5.0 passes the
+  paper's 10 % waveform line on a 100 s slice (p90 0.085) and fails at 600 s
+  (0.120, on `peak_to_valley` at 60 um). If the 600 s figure holds, T.261 has
+  no operating point that both passes the tolerance and beats WavPack's rate
+  ceiling.
+
+A ten-hypothesis search for T.261 profiles tuned to microelectrode data
+tested seven and found **no usable compression gain**; see
+[`.specify/specs/t261-profile-design-plan.md`](.specify/specs/t261-profile-design-plan.md),
+which records each refutation and its mechanism. The one positive result is a
+~39 % encode-time reduction that is *not* sorting-neutral.
+
+See [`.specify/specs/t261-benchmark-plan.md`](.specify/specs/t261-benchmark-plan.md)
+for the design and [`DEPLOY.md`](DEPLOY.md) for running it.
 
 ## Prerequisites
 
@@ -73,7 +106,7 @@ Both use the synthetic-tiny dataset (`configs/datasets/synthetic-tiny.yaml`)
 — no external data needed. The Snakefile fails fast (`WorkflowError`) if
 the profile requests a codec that isn't installed on this host.
 
-## Paper reproduction (in progress)
+## Paper reproduction
 
 ```bash
 # Portable (no wavpack — runs on any Linux):
@@ -84,10 +117,22 @@ pip install -e '.[audio]'
 make paper PROFILE=configs/profiles/paper-with-wavpack.yaml
 ```
 
-The gate profile is `configs/profiles/paper-real-np1-8.yaml` (8 NP1
-recordings x 4 preprocessing conditions x 44 codec configs = 1056 cells);
-`paper-real-16.yaml` extends it to all 16 recordings at full length. Both
-use the `datasets_matrix:` block, so adding a recording is one YAML entry.
+The completed reproduction used `configs/profiles/paper-real-np1-8-general.yaml`
+(912 cells); `paper-real-np1-8.yaml` is the narrower gate matrix and
+`paper-real-16.yaml` extends to all 16 recordings at full length. All use the
+`datasets_matrix:` block, so adding a recording is one YAML entry.
+
+Sorting evaluation is a separate pipeline — `sorting-eval-t261.yaml` for the
+codec/QP sweep, `sorting-eval-t261-profiles.yaml` for the profile candidates.
+Both need a GPU for Kilosort 4.
+
+Note on `wavpack-numcodecs`: we run **0.2.3**, the paper used **0.1.3**. The
+hybrid-mode flag changed in 0.1.4 (upstream `a812cb67`), so 0.1.3 silently
+discards `level` — the paper's own `level=3` never took effect. The two are
+rate-distortion equivalent at matched CR (median 1.2 %), but 0.1.3 reproduces
+the paper's published lossy CR to within 0.9 % where 0.2.3 deviates up to
+7.8 %. We keep 0.2.3 deliberately: 0.1.3's hybrid is broken and will not
+install on Python 3.13.
 
 ## Layout
 
@@ -102,8 +147,15 @@ use the `datasets_matrix:` block, so adding a recording is one YAML entry.
   this study was produced in a container. Reproducible per-codec images are
   planned as Phase 4.5.
 - `configs/` — dataset / codec / profile YAMLs. Add datasets by dropping a YAML;
-  no Python edits needed.
-- `.specify/specs/` — design docs.
+  no Python edits needed. `configs/bwc-cfg/` holds the T.261 profile-search
+  candidates alongside copies of every upstream preset, so `BWC_CFG_DIR` can
+  point at one directory and resolve both (it is process-global, and pointing
+  it at the candidates alone makes the stock presets unresolvable).
+- `scripts/profile-search/` — the T.261 profile-search harnesses, kept so each
+  recorded result can be re-run.
+- `.specify/specs/` — design docs. `t261-benchmark-plan.md` is the overall
+  design; `t261-profile-design-plan.md` carries the profile search and every
+  measured refutation.
 
 ## License
 
